@@ -3561,6 +3561,9 @@ void NativeViewport::changeEvent(QEvent *event) {
     // Repaint only: never rebuild scene data or interrupt a worker/navigation.
     update();
     refreshViewportPresentation();
+  } else if (event->type() == QEvent::FontChange ||
+             event->type() == QEvent::ApplicationFontChange) {
+    refreshViewportPresentation();
   }
 }
 
@@ -4746,22 +4749,36 @@ void NativeViewport::refreshViewportPresentation() {
   const QRect buttonRect(margin, std::max(0, height() - margin - buttonEdge), buttonEdge, buttonEdge);
   if (mViewportDetailsButton->geometry() != buttonRect) mViewportDetailsButton->setGeometry(buttonRect);
   const QFontMetrics metrics(mViewportStatusLabel->font());
-  const int available = std::max(1, width() - 2 * margin - buttonEdge - AppTheme::scaled(100, scale));
+  const int gap = AppTheme::scaled(5, scale);
+  const int labelX = std::min(width(), buttonRect.right() + 1 + gap);
+  const int labelHeight = std::min(height(), metrics.height() + 4);
+  const int labelY = std::clamp(buttonRect.center().y() - labelHeight / 2, 0, height() - labelHeight);
+  int labelRight = width() - margin;
+  // The direction controls are top-right. Their horizontal footprint is
+  // only reserved when their vertical band overlaps this bottom status row.
+  // The bounds don't depend on camera orientation; no view calculation is needed.
+  const auto navigation = navigationOverlayBounds(
+      navigationGizmoLayout(QMatrix4x4{}, QSizeF(size()), QFontMetricsF(font()).height()));
+  if (navigation.bottom() > labelY && navigation.top() < labelY + labelHeight)
+    labelRight = std::min(labelRight, static_cast<int>(std::floor(navigation.left())) - gap);
+  const int available = std::max(0, labelRight - labelX);
   const QString full = viewportStatusText();
   QString shown = full;
   if (metrics.horizontalAdvance(shown) > available) {
     const QString performance = viewportPerformanceText();
     if (!performance.isEmpty()) {
       shown = performance;
-      if (metrics.horizontalAdvance(shown) > available) shown = frameRatePresentationText(false);
+      if (metrics.horizontalAdvance(shown) > available) {
+        shown = frameRatePresentationText(false);
+        if (shown != performance && metrics.horizontalAdvance(shown) > available)
+          shown.clear(); // Keep the details button instead of drawing an incomplete FPS value.
+      }
     }
   }
   shown = metrics.elidedText(shown, Qt::ElideRight, available);
   if (mViewportStatusLabel->text() != shown) mViewportStatusLabel->setText(shown);
   if (mViewportStatusLabel->accessibleName() != full) mViewportStatusLabel->setAccessibleName(full);
-  const QRect labelRect(buttonRect.right() + 5,
-      buttonRect.center().y() - (metrics.height() + 4) / 2,
-      available, metrics.height() + 4);
+  const QRect labelRect(labelX, labelY, available, labelHeight);
   if (mViewportStatusLabel->geometry() != labelRect) mViewportStatusLabel->setGeometry(labelRect);
 }
 

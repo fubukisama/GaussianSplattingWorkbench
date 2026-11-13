@@ -839,19 +839,25 @@ Terminology references: [CloudCompare official translations](https://github.com/
 | Mean frame interval | 平均帧间隔 | 平均フレーム間隔 |
 
 The viewport and main status use one presentation counter. During activity the
-readout is `125.00 FPS (8.00 ms)`; a narrow HUD keeps FPS and the details retain
-the interval. The setting is on by default, saved per user, and hides the
+readout is `125.00 FPS (8.00 ms)`. The HUD leaves room for navigation controls
+only where they meet the status row. When the row cannot fit both numbers, it
+keeps the complete FPS; if even that does not fit, the details button remains
+available instead of showing a clipped number. The details retain the interval.
+The setting is on by default, saved per user, and hides the
 readout without affecting rendering or sampling. Preview pause remains visible.
 Language changes refresh existing controls and details without resetting samples
 or modifying the scene, camera or worker. Milliseconds mean the average interval
 between presented frames, not GPU execution time, monitor Hz or training it/s.
 
-中文：视图中的「显示帧率」默认开启并记住选择，只控制显示。窄视口优先保留
-FPS，详情保留平均呈现帧间隔。它不是 GPU 执行时间、屏幕刷新率或训练速度。
+中文：视图中的「显示帧率」默认开启并记住选择，只控制显示。状态区仅在与导航控件
+同一高度时避让。窄视口优先保留完整 FPS；放不下时保留详情按钮，不显示截断数字。
+详情保留平均呈现帧间隔，它不是 GPU 执行时间、屏幕刷新率或训练速度。
 语言即时切换不重置样本、场景、相机或工作进程。
 
 日本語：「フレームレートを表示」は既定で有効で、表示だけを切り替えて設定を
-保存します。狭いビューポートでは FPS を優先し、平均間隔は詳細に表示します。
+保存します。ステータス行とナビゲーション操作部が同じ高さにある場合のみ余白を確保
+します。狭いビューポートでは完全な FPS 表記を優先し、収まらない場合は数値を途中で
+切らず、詳細ボタンを残します。平均間隔は詳細に表示します。
 GPU 実行時間・ディスプレイのリフレッシュレート・学習速度とは異なります。
 言語変更でサンプル、シーン、カメラ、学習プロセスは変更しません。
 

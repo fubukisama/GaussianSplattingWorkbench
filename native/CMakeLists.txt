@@ -816,7 +816,8 @@ if(BUILD_TESTING)
   set_target_properties(gsw_runtime_component_launch_compile PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
   target_include_directories(gsw_runtime_component_launch_compile PRIVATE src)
   target_link_libraries(gsw_runtime_component_launch_compile PRIVATE
-    Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Svg)
+    gsw_sibr_fps_counter Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets
+    Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Svg)
   target_compile_definitions(gsw_runtime_component_launch_compile PRIVATE
     GSW_VERSION="${PROJECT_VERSION}" GSW_RELEASE_DATE="${GSW_RELEASE_DATE}")
   if(MSVC)

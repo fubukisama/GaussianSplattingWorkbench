@@ -390,6 +390,9 @@ int AppTheme::scaled(const int value, const int scalePercent) {
 void AppTheme::apply(QApplication &application, const int scalePercent, const bool persist) {
   const int scale = clampScale(scalePercent);
   const UiTheme theme = currentTheme();
+  // Qt can deliver font, palette and style events synchronously. Publish
+  // the new scale first so HUD geometry cannot use the previous scale.
+  application.setProperty("gswUiScalePercent", scale);
   application.setProperty("gswUiThemeMode", themeModeName(currentThemeMode()));
   application.setProperty("gswUiTheme", themeName(theme));
   application.setPalette(palette(theme));
@@ -405,7 +408,6 @@ void AppTheme::apply(QApplication &application, const int scalePercent, const bo
   font.setStyleStrategy(QFont::PreferAntialias);
   application.setFont(font);
   application.setStyleSheet(styleSheet(scale, theme));
-  application.setProperty("gswUiScalePercent", scale);
 
   if (persist) {
     QSettings settings;

@@ -305,7 +305,8 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
     }
     return false;
   };
-  const auto exerciseLayout = [&](bool narrow) {
+  enum class CadenceLayout { Full, Narrow, FpsOnly, DetailsOnly };
+  const auto exerciseLayout = [&](const QString &layout, CadenceLayout expected) {
     for (const auto &locale : locales) {
       const Snapshot before(document, viewport);
       const auto samples = viewport.presentedFrameIntervalCount();
@@ -318,31 +319,37 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
       const QString performance = viewport.viewportPerformanceText();
       const QString abbreviated = performance.section(QLatin1Char('('), 0, 0).trimmed();
       const QFontMetrics font(status->font());
-      qInfo() << "VIEWPORT_FPS_LAYOUT" << locale << theme << (narrow ? "narrow" : "regular")
+      const int fpsWidth = font.horizontalAdvance(abbreviated);
+      const int fullWidth = font.horizontalAdvance(performance);
+      const bool textFits = expected == CadenceLayout::Full
+          ? status->text().contains(performance)
+          : expected == CadenceLayout::DetailsOnly
+              ? status->width() < fpsWidth && status->text().isEmpty() && details->isVisible()
+              : expected == CadenceLayout::FpsOnly
+                  ? fpsWidth <= status->width() && status->width() < fullWidth &&
+                        status->text() == abbreviated
+                  : fpsWidth <= status->width() && status->text().contains(abbreviated);
+      qInfo() << "VIEWPORT_FPS_LAYOUT" << locale << theme << layout
               << "viewport/label widths" << viewport.width() << status->width()
-              << "abbreviated/full text widths" << font.horizontalAdvance(abbreviated)
-              << font.horizontalAdvance(performance)
+              << "abbreviated/full text widths" << fpsWidth << fullWidth
               << "DPR" << viewport.devicePixelRatioF() << "font" << status->font().pointSizeF()
               << "samples" << viewport.presentedFrameIntervalCount() << "status" << status->text();
       if (!check(viewport.viewportDetailsText().contains(performance) &&
           status->accessibleName() == viewport.viewportStatusText() &&
-          status->text().contains(narrow ? abbreviated : performance) &&
+          textFits &&
           viewport.rect().contains(status->geometry()) && viewport.rect().contains(details->geometry()) &&
           !status->geometry().intersects(details->geometry()) &&
-          (!narrow || (qApp->property("gswUiScalePercent").toInt() == 150 &&
-                       status->font().pointSizeF() >= 14.0 &&
-                       font.horizontalAdvance(abbreviated) <= status->width() &&
-                       status->width() < font.horizontalAdvance(performance) &&
-                       !status->text().contains(QStringLiteral(" ms)")))),
-          "wide status shows both values; a narrow status keeps FPS while details keep the interval")) return false;
-      if (!capture(locale, narrow ? QStringLiteral("fps-narrow.png") : QStringLiteral("fps-active.png"))) return false;
+          (expected == CadenceLayout::Full || (qApp->property("gswUiScalePercent").toInt() == 150 &&
+                       status->font().pointSizeF() >= 14.0)),
+          "status shows complete cadence or falls back to details without misleading partial numbers")) return false;
+      if (!capture(locale, QStringLiteral("fps-%1.png").arg(layout))) return false;
       if (!check(waitUntil([&] { return viewport.viewportPerformanceText() == translated("空闲"); }),
           "actual input settles to localized idle without stale live values")) return false;
-      if (!narrow && !capture(locale, QStringLiteral("fps-idle.png"))) return false;
+      if (expected == CadenceLayout::Full && !capture(locale, QStringLiteral("fps-idle.png"))) return false;
     }
     return true;
   };
-  if (!exerciseLayout(false)) return false;
+  if (!exerciseLayout(QStringLiteral("active"), CadenceLayout::Full)) return false;
   const int originalScale = qApp->property("gswUiScalePercent").toInt();
   const bool automatic = autoScale->isChecked();
   auto *largeScale = scaleAction(150);
@@ -357,16 +364,24 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
     previousScale->trigger();
     return false;
   }
-  // The test owns the viewport. Constrain its layout width explicitly:
-  // resizeDocks() is only advisory and ignored by some Windows layouts.
-  // Keep the ordinary paint/resize path, not a mocked status label.
+  // Re-run the exact failing width before deriving any measurements from
+  // the settled scaled geometry. Do not widen the original regression case.
+  const auto constrainWidth = [&](int wanted) {
+    viewport.setFixedWidth(wanted);
+    window.layout()->activate();
+    return waitUntil([&] { return viewport.width() == wanted; });
+  };
+  const bool originalWidthGood = check(constrainWidth(257),
+      "test-owned viewport reproduces the 257 px width at 150 percent scale") &&
+      exerciseLayout(QStringLiteral("narrow-257"), CadenceLayout::Narrow);
   const int reserved = viewport.width() - status->width();
-  const int wanted = reserved + QFontMetrics(status->font()).horizontalAdvance(QStringLiteral("888.88 FPS")) + 8;
-  viewport.setFixedWidth(wanted);
-  window.layout()->activate();
-  dispatchFor(80);
-  const bool narrowGood = check(viewport.width() == wanted,
-      "test-owned viewport is genuinely narrow at 150 percent scale") && exerciseLayout(true);
+  const int wanted = reserved +
+      QFontMetrics(status->font()).horizontalAdvance(QStringLiteral("888.88 FPS")) + 8;
+  const bool narrowGood = originalWidthGood && check(wanted < 257 && constrainWidth(wanted),
+      "also exercise the more constrained FPS-only layout") &&
+      exerciseLayout(QStringLiteral("narrow"), CadenceLayout::FpsOnly) &&
+      check(constrainWidth(reserved + 35), "reproduce the original 35 px text budget") &&
+      exerciseLayout(QStringLiteral("details-only"), CadenceLayout::DetailsOnly);
   viewport.setMinimumWidth(originalMinimum);
   viewport.setMaximumWidth(originalMaximum);
   previousScale->trigger();
