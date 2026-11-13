@@ -449,7 +449,10 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
   viewport.show();
   if (!check(hidden && waitUntil([&] { return !observeFirst; }) && firstAnchored,
       "hidden viewport stops sampling; first shown frame reanchors without a hidden interval")) return false;
-  return check(active(), "real cadence resumes after the viewport is shown");
+  if (!check(active(), "real cadence resumes after the viewport is shown")) return false;
+  qInfo() << "VIEWPORT_FPS_CONTROLS PASS:" << theme
+          << "three locales, 150% narrow/details fallback, pause, hide, resume";
+  return true;
 }
 
 struct GridInk final {
@@ -842,8 +845,6 @@ bool runViewportStatusControlsSmokeTest(MainWindow &window) {
     }) || !check(before.unchanged(*document, *viewport), "details menu does not mutate project or camera")) return false;
     if (!saveImage(window, evidenceDirectory(output, locale, theme), QStringLiteral("full-window.png"))) return false;
   }
-  if (!frameRatePresentationControls(window, *viewport, *document, output, theme, locales)) return false;
-
   // Bounded second known-unit source prevents an accidental hardcoded 1 m/u.
   // Compare its own reference ratio and source poses, never its raw view camera
   // with the previous metre source's numerically different display frame.
@@ -882,6 +883,11 @@ bool runViewportStatusControlsSmokeTest(MainWindow &window) {
   }) || !check(mmBefore.unchanged(*document, *viewport) && sha256(mmPath) == mmHash &&
       sha256(metricPath) == metricHash && sha256(unknownPath) == unknownHash,
       "all unit controls and cancellation preserve every original fixture byte and same-source state")) return false;
+
+  // Keep the m/mm pixel comparison in a single unresized layout. The FPS
+  // exercises deliberately resize the viewport and change the UI scale.
+  if (!frameRatePresentationControls(window, *viewport, *document, output, theme, locales)) return false;
+
   qInfo() << "VIEWPORT_STATUS_CONTROLS PASS:" << theme
           << "unknown/m/mm; real actions/button; invalid/cancel; immediate 3 locales; save/reopen; read-only details; elapsed ms"
           << total.elapsed();
