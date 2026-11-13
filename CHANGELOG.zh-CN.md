@@ -30,6 +30,10 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 - **兼容性：**不更换渲染器，不修改训练、工程格式或更新器。固定版本的
   Apache-2.0 SIBR 源码及声明随对应源码和二进制分发。[源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/050672c6884ccf74502bb9266546be2b501fa9cf)。
 
+- **修复：**150% 界面缩放下，视口状态区不再给不在同一行的导航控件预留宽度。
+  窄视口保留完整 FPS；放不下时只留详情按钮，平均帧间隔仍可查阅。Windows
+  构建探针也已补齐 SIBR 头文件依赖。[源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/92ac8101cf178ba913c9bfe92f40f0fe447b1121)。
+
 ## 2026-10-30
 
 状态：**已实现**；此节是源码记录，不是发布或安装回执。

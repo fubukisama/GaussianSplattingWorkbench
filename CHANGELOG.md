@@ -38,6 +38,12 @@ Release or local installation is part of this change.
   The pinned Apache-2.0 SIBR source and notices accompany corresponding source
   and binaries. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/050672c6884ccf74502bb9266546be2b501fa9cf).
 
+- **Fixed:** at 150% UI scale, the viewport no longer reserves space for
+  navigation controls outside the status row. A narrow viewport keeps the whole
+  FPS value or shows only the details button when it cannot fit; the mean frame
+  interval remains available in details. The Windows build probe also inherits
+  the SIBR header dependency. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/92ac8101cf178ba913c9bfe92f40f0fe447b1121).
+
 ## 2026-10-30
 
 Status: **Implemented**; this section is a source record, not a release or installation receipt.

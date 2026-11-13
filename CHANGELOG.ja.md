@@ -36,6 +36,11 @@ Gaussian Splatting Workbench の利用者向け変更を新しい順に記録し
   固定版の Apache-2.0 SIBR ソースと通知を対応ソースおよびバイナリに同梱します。
   [ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/050672c6884ccf74502bb9266546be2b501fa9cf)。
 
+- **修正：**UI スケール 150% で、ステータス行と重ならないナビゲーション
+  操作部の余白を取りません。幅が狭い場合は FPS 全体を表示し、収まらない場合は
+  詳細ボタンだけを残します。平均フレーム間隔は詳細で確認できます。Windows の
+  ビルド検査にも SIBR ヘッダーの依存関係を追加しました。[ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/92ac8101cf178ba913c9bfe92f40f0fe447b1121)。
+
 ## 2026-10-30
 
 状態：**実装済み**。本節はソース記録であり、公開・インストールの証明ではありません。
