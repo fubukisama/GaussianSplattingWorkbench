@@ -43,6 +43,17 @@ def create_remote_fixture(output_root):
         for destination in (package / relative, package / "source" / relative):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, destination)
+    # Exercise the real corresponding-source and notice requirements without
+    # including a compiled counter or a launchable application in the fixture.
+    sibr = ROOT / "native/third_party/sibr-fps-counter"
+    sibr_source = package / "source/native/third_party/sibr-fps-counter"
+    sibr_notices = package / "licenses/sibr-fps-counter"
+    sibr_source.mkdir(parents=True)
+    sibr_notices.mkdir(parents=True)
+    for name in ("FPSCounter.cpp", "FPSCounter.hpp", "LICENSE.md", "README.gsw.md"):
+        shutil.copyfile(sibr / name, sibr_source / name)
+    for name in ("LICENSE.md", "README.gsw.md"):
+        shutil.copyfile(sibr / name, sibr_notices / name)
     warning = (
         "# INSTALLER ACCEPTANCE FIXTURE ONLY\n\n"
         "English: Synthetic test payload, not the GSW desktop application. Its EXE/DLL files are "

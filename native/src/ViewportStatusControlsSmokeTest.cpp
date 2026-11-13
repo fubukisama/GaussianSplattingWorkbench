@@ -19,7 +19,6 @@
 #include <QDialog>
 #include <QDir>
 #include <QDoubleSpinBox>
-#include <QDockWidget>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
@@ -28,6 +27,7 @@
 #include <QImage>
 #include <QJsonDocument>
 #include <QLabel>
+#include <QLayout>
 #include <QLineEdit>
 #include <QLocale>
 #include <QPlainTextEdit>
@@ -264,10 +264,8 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
   auto *pause = window.findChild<QAction *>(QStringLiteral("pausePreviewAction"));
   auto *status = viewport.findChild<QLabel *>(QStringLiteral("viewportStatusLabel"));
   auto *details = viewport.findChild<QToolButton *>(QStringLiteral("viewportDetailsButton"));
-  auto *left = window.findChild<QDockWidget *>(QStringLiteral("projectDock"));
-  auto *right = window.findChild<QDockWidget *>(QStringLiteral("inspectorDock"));
   const auto key = QStringLiteral("view/showFrameRate");
-  if (!check(action && pause && status && details && left && right && window.screen() &&
+  if (!check(action && pause && status && details && window.screen() && window.layout() &&
       action->isCheckable() && action->isChecked() &&
       status->testAttribute(Qt::WA_TransparentForMouseEvents),
       "visible-by-default frame rate action and non-intercepting status exist")) return false;
@@ -310,17 +308,22 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
       if (!check(active(), "real camera input shows both cadence values")) return false;
       const QString performance = viewport.viewportPerformanceText();
       const QString abbreviated = performance.section(QLatin1Char('('), 0, 0).trimmed();
+      const QFontMetrics font(status->font());
+      qInfo() << "VIEWPORT_FPS_LAYOUT" << locale << theme << (narrow ? "narrow" : "regular")
+              << "viewport/label widths" << viewport.width() << status->width()
+              << "abbreviated/full text widths" << font.horizontalAdvance(abbreviated)
+              << font.horizontalAdvance(performance)
+              << "DPR" << viewport.devicePixelRatioF() << "font" << status->font().pointSizeF()
+              << "samples" << viewport.presentedFrameIntervalCount() << "status" << status->text();
       if (!check(viewport.viewportDetailsText().contains(performance) &&
           status->accessibleName() == viewport.viewportStatusText() &&
           status->text().contains(narrow ? abbreviated : performance) &&
           viewport.rect().contains(status->geometry()) && viewport.rect().contains(details->geometry()) &&
           !status->geometry().intersects(details->geometry()) &&
-          (!narrow || !status->text().contains(QStringLiteral(" ms)"))),
+          (!narrow || (font.horizontalAdvance(abbreviated) <= status->width() &&
+                       status->width() < font.horizontalAdvance(performance) &&
+                       !status->text().contains(QStringLiteral(" ms)")))),
           "wide status shows both values; a narrow status keeps FPS while details keep the interval")) return false;
-      qInfo() << "VIEWPORT_FPS_LAYOUT" << locale << theme << (narrow ? "narrow" : "regular")
-              << "viewport/label widths" << viewport.width() << status->width()
-              << "DPR" << viewport.devicePixelRatioF() << "font" << status->font().pointSizeF()
-              << "samples" << viewport.presentedFrameIntervalCount() << "status" << status->text();
       if (!capture(locale, narrow ? QStringLiteral("fps-narrow.png") : QStringLiteral("fps-active.png"))) return false;
       if (!check(waitUntil([&] { return viewport.viewportPerformanceText() == translated("空闲"); }),
           "actual input settles to localized idle without stale live values")) return false;
@@ -328,23 +331,27 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
     }
     return true;
   };
-  const int leftWidth = left->width(), rightWidth = right->width();
   if (!exerciseLayout(false)) return false;
   const int originalScale = qApp->property("gswUiScalePercent").toInt();
+  const int originalMinimum = viewport.minimumWidth(), originalMaximum = viewport.maximumWidth();
   AppTheme::apply(*qApp, 150, false);
   dispatchFor(80);
-  // Constrain the real central viewport using its existing docks. Use actual
-  // font metrics, not a resolution that only fits one locale/DPI.
+  // The test owns the viewport. Constrain its layout width explicitly:
+  // resizeDocks() is only advisory and ignored by some Windows layouts.
+  // Keep the ordinary paint/resize path, not a mocked status label.
   const QString fpsOnly = QStringLiteral("888.88 FPS");
   const int scale = qApp->property("gswUiScalePercent").toInt();
   const int wanted = 2 * AppTheme::scaled(10, scale) + details->width() +
       AppTheme::scaled(100, scale) + QFontMetrics(status->font()).horizontalAdvance(fpsOnly) + 4;
-  const int extra = std::max(0, viewport.width() - wanted);
-  window.resizeDocks({left, right}, {leftWidth + extra / 2, rightWidth + (extra + 1) / 2}, Qt::Horizontal);
+  viewport.setFixedWidth(wanted);
+  window.layout()->activate();
   dispatchFor(80);
-  const bool narrowGood = exerciseLayout(true);
+  const bool narrowGood = check(viewport.width() == wanted,
+      "test-owned viewport is genuinely narrow at 150 percent scale") && exerciseLayout(true);
+  viewport.setMinimumWidth(originalMinimum);
+  viewport.setMaximumWidth(originalMaximum);
   AppTheme::apply(*qApp, originalScale, false);
-  window.resizeDocks({left, right}, {leftWidth, rightWidth}, Qt::Horizontal);
+  window.layout()->activate();
   dispatchFor(80);
   if (!narrowGood) return false;
 

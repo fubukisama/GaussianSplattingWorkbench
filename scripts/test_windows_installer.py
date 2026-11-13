@@ -464,6 +464,16 @@ class RemoteFixtureCliTests(InstallerFixture):
         self.assertEqual(file_hash(package / "source/native/assets/gsw-app-icon.ico"),
                          file_hash(ROOT / "native/assets/gsw-app-icon.ico"))
         self.assertEqual((package / "COPYING").read_bytes(), (ROOT / "COPYING").read_bytes())
+        sibr = ROOT / "native/third_party/sibr-fps-counter"
+        for name in ("FPSCounter.cpp", "FPSCounter.hpp", "LICENSE.md", "README.gsw.md"):
+            self.assertEqual(
+                (package / "source/native/third_party/sibr-fps-counter" / name).read_bytes(),
+                (sibr / name).read_bytes(),
+            )
+        for name in ("LICENSE.md", "README.gsw.md"):
+            self.assertEqual(
+                (package / "licenses/sibr-fps-counter" / name).read_bytes(), (sibr / name).read_bytes()
+            )
         self.assertIn("INSTALLER ACCEPTANCE FIXTURE ONLY", (package / "FIXTURE-ONLY.md").read_text(encoding="utf-8"))
         manifest = json.loads((package / "source-manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["executableSha256"], file_hash(package / "bin/Gaussian Scene Workbench.exe"))
