@@ -7,6 +7,11 @@ $executable = Join-Path $root 'bin/Gaussian Scene Workbench.exe'
 foreach ($required in @($executable, (Join-Path $source 'native/CMakeLists.txt'),
     (Join-Path $source 'native/src/shaders/SurfelProjection.glsl'),
     (Join-Path $source 'native/third_party/blender-gizmo/BlenderGizmoGeometry.cpp'),
+    (Join-Path $source 'native/third_party/sibr-fps-counter/FPSCounter.cpp'),
+    (Join-Path $source 'native/third_party/sibr-fps-counter/FPSCounter.hpp'),
+    (Join-Path $source 'native/third_party/sibr-fps-counter/LICENSE.md'),
+    (Join-Path $root 'licenses/sibr-fps-counter/LICENSE.md'),
+    (Join-Path $root 'licenses/sibr-fps-counter/README.gsw.md'),
     (Join-Path $root 'COPYING'), (Join-Path $root 'native/LICENSE.md'))) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Corresponding-source package file is missing: $required"

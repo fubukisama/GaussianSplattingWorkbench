@@ -262,6 +262,10 @@ public:
   [[nodiscard]] QString viewportStatusText() const;
   [[nodiscard]] QString viewportPerformanceText() const;
   [[nodiscard]] QString viewportDetailsText() const;
+  void setShowFrameRate(bool visible);
+  [[nodiscard]] std::size_t presentedFrameIntervalCount() const {
+    return mFrameRateCounter.sampleCount();
+  }
   [[nodiscard]] ViewportGridSettings viewportGridSettings() const { return mViewportGridSettings; }
   bool setViewportGridSettings(const ViewportGridSettings &settings, QString *error = nullptr);
   bool validateViewportGridSettingsForDisplay(const ViewportGridSettings &settings,
@@ -575,8 +579,11 @@ private:
   void updateFrameRefreshPolicy();
   [[nodiscard]] bool hasPendingFrameUploads() const;
   [[nodiscard]] bool frameTimingBurstActive() const;
+  [[nodiscard]] bool presentationCanBeSampled() const;
+  [[nodiscard]] QString frameRatePresentationText(bool includeInterval) const;
   void refreshViewportPresentation();
   void pausePresentationMetrics();
+  void resetPresentationMetrics();
   void monitorRefreshWindow();
   void notifyEditState();
   void uploadPendingPointCloud();
@@ -833,7 +840,7 @@ private:
   QToolButton *mViewportDetailsButton = nullptr;
   bool mPresentationIdle = true;
   bool mPresentationWaiting = false;
-  quint64 mFreshPresentationFrames = 0;
+  bool mShowFrameRate = true;
   QColor mPresentationInk;
   ViewportGridSettings mViewportGridSettings;
   std::unique_ptr<RenderFrameDiagnostics> mRenderDiagnostics;

@@ -317,9 +317,6 @@ private:
   enum class RendererStatusPhase { Normal, Loading, Failed };
   RendererStatusPhase mRendererStatusPhase = RendererStatusPhase::Normal;
   qsizetype mRendererPreviewPrimitiveCount = -1;
-  double mRendererFramesPerSecond = 0.0;
-  double mRendererFrameMilliseconds = 0.0;
-  bool mRendererHasFrameMetrics = false;
   bool mRendererShowGpuNotice = false;
 
   QAction *mNewProjectAction = nullptr;

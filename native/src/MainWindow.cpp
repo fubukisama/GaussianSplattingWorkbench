@@ -2082,6 +2082,17 @@ void MainWindow::createMenus() {
   viewMenu->addSeparator();
   viewMenu->addAction(mViewportGridSettingsAction);
   viewMenu->addAction(mViewportDetailsAction);
+  auto *showFrameRate = AppLanguage::text(viewMenu->addAction(QString()),
+      AppLanguage::source("显示帧率"));
+  showFrameRate->setObjectName(QStringLiteral("showViewportFrameRateAction"));
+  showFrameRate->setCheckable(true);
+  const auto frameRateKey = QStringLiteral("view/showFrameRate");
+  showFrameRate->setChecked(QSettings().value(frameRateKey, true).toBool());
+  mViewport->setShowFrameRate(showFrameRate->isChecked());
+  connect(showFrameRate, &QAction::toggled, this, [this, frameRateKey](bool visible) {
+    mViewport->setShowFrameRate(visible);
+    QSettings().setValue(frameRateKey, visible);
+  });
   viewMenu->addSeparator();
   auto *languageMenu = AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "语言 / Language")), AppLanguage::source("语言 / Language"), "title");
   languageMenu->setObjectName(QStringLiteral("languageMenu"));
@@ -2757,9 +2768,9 @@ void MainWindow::createTaskDock() {
 void MainWindow::createStatusBar() {
   mProjectStatus = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "未打开工程"), this), AppLanguage::source("未打开工程"));
   mProjectStatus->setObjectName(QStringLiteral("mutedLabel"));
-  // This label is generated from cached live state, never rebound to its
-  // initial empty-scene text when the application language changes.
+  // Mirror the viewport's current presentation, not a separately timed FPS.
   mRendererStatus = new QLabel(this);
+  mRendererStatus->setTextFormat(Qt::PlainText);
   mRendererStatus->setObjectName(QStringLiteral("statusWarn"));
   mRendererStatus->setProperty("gswStatusRole", QStringLiteral("renderer"));
   mEditStatus = AppLanguage::text(new QLabel(QCoreApplication::translate("Workbench", "选择 0 | 删除 0"), this), AppLanguage::source("选择 0 | 删除 0"));
@@ -2784,7 +2795,7 @@ void MainWindow::refreshRendererStatus() {
     const QString previewMode = mRendererStatus->property("gpuPreviewMode").toString();
     const QString detail = mRendererStatus->property("gpuPreviewDetail").toString();
     text = detail.isEmpty() ? previewMode : QStringLiteral("%1 | %2").arg(previewMode, detail);
-    text += QStringLiteral(" · ") + frameRate;
+    if (!frameRate.isEmpty()) text += QStringLiteral(" · ") + frameRate;
   } else if (mRendererStatusPhase == RendererStatusPhase::Loading) {
     text = QCoreApplication::translate("Workbench", "正在读取 PLY 场景");
   } else if (mRendererStatusPhase == RendererStatusPhase::Failed) {
@@ -3766,13 +3777,8 @@ void MainWindow::connectServices() {
       });
   connect(
       mViewport, &NativeViewport::frameMetricsChanged, this,
-      [this](const double framesPerSecond,
-             const double averageFrameMilliseconds) {
-        mRendererFramesPerSecond = framesPerSecond;
-        mRendererFrameMilliseconds = averageFrameMilliseconds;
-        mRendererHasFrameMetrics = true;
+      [this] {
         mRendererShowGpuNotice = mViewport->trainingGpuPreviewActive();
-        refreshRendererStatus();
       });
   connect(mViewport, &NativeViewport::viewportPresentationChanged,
           this, &MainWindow::refreshRendererStatus);
@@ -3800,7 +3806,6 @@ void MainWindow::connectServices() {
           [this](const QString &scenePath) {
             mRendererStatusPhase = RendererStatusPhase::Loading;
             mRendererShowGpuNotice = false;
-            mRendererHasFrameMetrics = false;
             refreshRendererStatus();
             appendTaskEvent(QCoreApplication::translate("Workbench", "读取场景：%1")
                                 .arg(QDir::toNativeSeparators(scenePath)));
@@ -3815,7 +3820,6 @@ void MainWindow::connectServices() {
                                     : previewVertexCount;
             mRendererStatusPhase = RendererStatusPhase::Normal;
             mRendererShowGpuNotice = false;
-            mRendererHasFrameMetrics = false;
             mRendererPreviewPrimitiveCount = previewPrimitiveCount;
             refreshRendererStatus();
             if (sourceFaceCount > 0) {
@@ -7647,7 +7651,6 @@ void MainWindow::updateWorkspaceUi() {
       !mViewport->trainingGpuPreviewActive()) {
     mRendererStatusPhase = RendererStatusPhase::Normal;
     mRendererPreviewPrimitiveCount = -1;
-    mRendererHasFrameMetrics = false;
     mRendererShowGpuNotice = false;
   }
   refreshRendererStatus();

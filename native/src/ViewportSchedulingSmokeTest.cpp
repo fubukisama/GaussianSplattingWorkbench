@@ -4,6 +4,7 @@
 #include "WorkspaceDocument.h"
 #include "ViewportStatusControlsSmokeTest.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QDebug>
 #include <QDir>
@@ -15,13 +16,15 @@
 #include <QPixmap>
 #include <QRegularExpression>
 #include <QScopeGuard>
+#include <QScreen>
 #include <QTimer>
 #include <QTemporaryDir>
 #include <QVariant>
 #include <QWheelEvent>
 
-#include <functional>
+#include <array>
 #include <cmath>
+#include <functional>
 
 namespace gsw {
 namespace {
@@ -101,7 +104,7 @@ bool sharedPresentationSemantics(MainWindow &window, const NativeViewport &viewp
   return good;
 }
 
-bool idlePerformanceLabelRegression(MainWindow &window, NativeViewport &viewport) {
+bool idlePerformanceLabelRegression(MainWindow &window, NativeViewport &viewport, int kind) {
   const auto check = [](bool ok, const char *message) {
     if (!ok) qCritical() << "VIEWPORT_PERFORMANCE_STATE FAIL:" << message;
     return ok;
@@ -109,45 +112,91 @@ bool idlePerformanceLabelRegression(MainWindow &window, NativeViewport &viewport
   QLabel *renderer = nullptr;
   for (auto *label : window.findChildren<QLabel *>())
     if (label->property("gswStatusRole").toString() == QStringLiteral("renderer")) renderer = label;
-  if (!check(renderer && renderer->isVisible() && renderer->width() > 0,
+  auto *showFps = window.findChild<QAction *>(QStringLiteral("showViewportFrameRateAction"));
+  auto *uploadTimer = viewport.findChild<QTimer *>(QStringLiteral("viewportUploadRefreshTimer"));
+  auto *pollTimer = viewport.findChild<QTimer *>(QStringLiteral("trainingPreviewPollTimer"));
+  if (!check(renderer && renderer->isVisible() && renderer->width() > 0 &&
+      showFps && showFps->isChecked() && uploadTimer && pollTimer,
       "actual user-visible renderer performance label exists")) return false;
-  quint64 freshPresentations = 0, metricUpdates = 0;
+  quint64 compositions = 0, freshPresentations = 0, metricUpdates = 0;
+  quint64 uploadWakeups = 0, pollWakeups = 0;
   quint64 lastRenderedSerial = viewport.renderedFrameSerial();
   double lastFps = 0.0, lastMilliseconds = 0.0;
   const auto presentation = QObject::connect(&viewport, &QOpenGLWidget::frameSwapped, &viewport, [&] {
+    ++compositions;
     const quint64 serial = viewport.renderedFrameSerial();
     if (serial != lastRenderedSerial) { lastRenderedSerial = serial; ++freshPresentations; }
   });
   const auto metrics = QObject::connect(&viewport, &NativeViewport::frameMetricsChanged, &viewport,
       [&](double fps, double milliseconds) { ++metricUpdates; lastFps = fps; lastMilliseconds = milliseconds; });
-  const auto disconnect = qScopeGuard([&] { QObject::disconnect(presentation); QObject::disconnect(metrics); });
+  const auto upload = QObject::connect(uploadTimer, &QTimer::timeout, &viewport, [&] { ++uploadWakeups; });
+  const auto poll = QObject::connect(pollTimer, &QTimer::timeout, &viewport, [&] { ++pollWakeups; });
+  const auto disconnect = qScopeGuard([&] {
+    QObject::disconnect(presentation);
+    QObject::disconnect(metrics);
+    QObject::disconnect(upload);
+    QObject::disconnect(poll);
+    showFps->setChecked(true);
+  });
   const QPoint start = viewport.rect().center();
-  const auto targetBefore = viewport.viewTarget();
+  const QString idle = QCoreApplication::translate("Workbench", "空闲");
+  const QString evidence = QDir(qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR", QDir::tempPath())).filePath(
+      QStringLiteral("viewport-performance-state-%1/mode-%2")
+          .arg(qApp->property("gswUiTheme").toString()).arg(kind));
+  if (!check(QDir().mkpath(evidence) && window.screen(), "owned evidence directory and screen")) return false;
+  const auto capture = [&](const QString &name) {
+    return window.screen()->grabWindow(window.winId()).save(QDir(evidence).filePath(name));
+  };
   const auto mouse = [&](QEvent::Type type, const QPoint &point, Qt::MouseButton button, Qt::MouseButtons buttons) {
     QMouseEvent event(type, QPointF(point), QPointF(viewport.mapToGlobal(point)), button, buttons, Qt::NoModifier);
     QApplication::sendEvent(&viewport, &event);
   };
-  mouse(QEvent::MouseButtonPress, start, Qt::MiddleButton, Qt::MiddleButton);
-  QPoint end = start;
-  for (int step = 1; step <= 12; ++step) {
-    end = start + QPoint(step * 2, step % 2);
-    mouse(QEvent::MouseMove, end, Qt::NoButton, Qt::MiddleButton);
-    dispatchFor(30);
-  }
-  const QString activeText = renderer->text();
-  mouse(QEvent::MouseButtonRelease, end, Qt::MiddleButton, Qt::NoButton);
-  const QRegularExpression fpsPattern(QStringLiteral("([0-9]+(?:\\.[0-9]+)?)\\s*FPS"));
-  const auto activeFps = fpsPattern.match(activeText);
-  if (!check(viewport.viewTarget() != targetBefore && freshPresentations >= 2 && metricUpdates >= 2 &&
+  const auto counts = [&] {
+    return std::array<quint64, 8>{viewport.renderedFrameSerial(), freshPresentations, metricUpdates,
+        viewport.gaussianAttributeUploads(), viewport.gaussianOrderUploads(), viewport.gaussianShUploads(),
+        uploadWakeups, pollWakeups};
+  };
+  // Allow each real input frame to present before sending the next, so the
+  // comparison is not a measurement of runner-dependent event coalescing.
+  const auto pan = [&] {
+    mouse(QEvent::MouseButtonPress, start, Qt::MiddleButton, Qt::MiddleButton);
+    QPoint end = start;
+    const auto release = qScopeGuard([&] {
+      mouse(QEvent::MouseButtonRelease, end, Qt::MiddleButton, Qt::NoButton);
+    });
+    for (int step = 1; step <= 8; ++step) {
+      const auto previous = metricUpdates;
+      end = start + QPoint(step * 2, step % 2);
+      mouse(QEvent::MouseMove, end, Qt::NoButton, Qt::MiddleButton);
+      if (!waitUntil([&] { return metricUpdates > previous; }, 1400)) return false;
+    }
+    return true;
+  };
+  const auto delta = [&](const auto &before) {
+    auto after = counts();
+    for (std::size_t i = 0; i < after.size(); ++i) after[i] -= before[i];
+    return after;
+  };
+  viewport.resetCamera();
+  dispatchFor(80);
+  if (!check(waitUntil([&] { return viewport.viewportPerformanceText() == idle; }, 2500),
+      "baseline camera settles before each measured input sequence")) return false;
+  const auto targetBefore = viewport.viewTarget();
+  const auto beforeVisible = counts();
+  if (!check(pan(), "all eight real pan inputs present")) return false;
+  const auto visibleWork = delta(beforeVisible);
+  const QString activeText = viewport.viewportPerformanceText();
+  const QRegularExpression fpsPattern(QStringLiteral("^[0-9]+\\.[0-9]{2} FPS \\([0-9]+\\.[0-9]{2} ms\\)$"));
+  const QString expected = QStringLiteral("%1 FPS (%2 ms)")
+      .arg(lastFps, 0, 'f', 2).arg(lastMilliseconds, 0, 'f', 2);
+  if (!check(viewport.viewTarget() != targetBefore && visibleWork[1] >= 8 &&
+      visibleWork[1] == visibleWork[2] && viewport.presentedFrameIntervalCount() > 0 &&
       std::isfinite(lastFps) && lastFps > 0.0 && std::isfinite(lastMilliseconds) && lastMilliseconds > 0.0 &&
-      activeFps.hasMatch() && activeFps.captured(1).toDouble() > 0.0,
-      "real pan presents new viewport frames and updates the visible measured FPS")) return false;
-  if (!sharedPresentationSemantics(window, viewport)) return false;
-  const QString evidence = QDir(qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR", QDir::tempPath())).filePath(
-      QStringLiteral("viewport-performance-state-") + qApp->property("gswUiTheme").toString());
-  if (!check(QDir().mkpath(evidence) && window.grab().save(QDir(evidence).filePath("after-real-pan.png")),
-      "retain actual window evidence after the measured pan")) return false;
-  const QString idle = QCoreApplication::translate("Workbench", "空闲");
+      fpsPattern.match(activeText).hasMatch() && activeText == expected &&
+      viewport.viewportDetailsText().contains(activeText),
+      "fresh presented frames each emit once and the same two-decimal snapshot reaches the details")) return false;
+  if (!sharedPresentationSemantics(window, viewport) ||
+      !check(capture(QStringLiteral("after-real-pan.png")), "capture actual active viewport without repainting it")) return false;
   const auto targetAfterPan = viewport.viewTarget();
   // The idle verdict must arise from the real event/presentation loop. Do not
   // call update(), grabFramebuffer(), or repeatedly capture while waiting:
@@ -157,7 +206,7 @@ bool idlePerformanceLabelRegression(MainWindow &window, NativeViewport &viewport
   qInfo() << "VIEWPORT_PERFORMANCE_STATE active/stopped label" << activeText << stoppedText
           << "fresh presentations/metric updates" << freshPresentations << metricUpdates;
   if (!becameIdle || !renderer->isVisible()) {
-    window.grab().save(QDir(evidence).filePath("after-input-stops.png"));
+    capture(QStringLiteral("after-input-stops.png"));
     return check(false, "after input stops the visible renderer label says idle instead of retaining live numeric FPS");
   }
   const auto idlePresentations = freshPresentations;
@@ -166,10 +215,58 @@ bool idlePerformanceLabelRegression(MainWindow &window, NativeViewport &viewport
       freshPresentations <= idlePresentations + 1 && !hasZeroIntervalTimer(viewport);
   // Capture after the verdict, so evidence collection cannot itself create
   // work in the interval used to reject a counter-only presentation loop.
-  window.grab().save(QDir(evidence).filePath("after-input-stops.png"));
+  if (!check(capture(QStringLiteral("after-input-stops.png")), "capture real idle viewport")) return false;
   if (!check(remainsIdle,
       "idle state remains visible without a counter-only redraw loop or camera movement")) return false;
   if (!sharedPresentationSemantics(window, viewport)) return false;
+
+  // Exercise actual Qt top-level composition, not an artificial emission of
+  // frameSwapped. The status widget is outside the viewport's GL FBO.
+  const auto compositionBefore = compositions;
+  const auto labelOnly = counts();
+  const auto labelSamples = viewport.presentedFrameIntervalCount();
+  renderer->update();
+  if (!check(waitUntil([&] { return compositions > compositionBefore; }, 1500) &&
+      counts() == labelOnly && viewport.presentedFrameIntervalCount() == labelSamples &&
+      viewport.viewportPerformanceText() == idle,
+      "recomposing only the status label does not render or count a viewport frame")) return false;
+
+  viewport.resetCamera();
+  dispatchFor(80);
+  if (!check(waitUntil([&] { return viewport.viewportPerformanceText() == idle; }, 2500) &&
+      viewport.viewTarget() == targetBefore, "same fixture and camera before hiding FPS")) return false;
+  const auto beforeToggle = counts();
+  const auto beforeToggleSamples = viewport.presentedFrameIntervalCount();
+  showFps->setChecked(false);
+  dispatchFor(80);
+  if (!check(viewport.viewportPerformanceText().isEmpty() && counts() == beforeToggle &&
+      viewport.presentedFrameIntervalCount() == beforeToggleSamples,
+      "hiding FPS does not redraw, upload, poll, or reset the samples")) return false;
+  const auto beforeHidden = counts();
+  if (!check(pan(), "same real pan still presents with the display disabled")) return false;
+  const auto hiddenWork = delta(beforeHidden);
+  const auto logWork = [&](const char *mode, const auto &work) {
+    qInfo() << "VIEWPORT_FPS_WORK" << kind << mode
+            << "render/present/metric" << work[0] << work[1] << work[2]
+            << "attribute/order/SH" << work[3] << work[4] << work[5]
+            << "uploadWake/pollWake" << work[6] << work[7]
+            << "intervals" << viewport.presentedFrameIntervalCount();
+  };
+  logWork("shown", visibleWork);
+  logWork("hidden", hiddenWork);
+  if (!check(visibleWork == hiddenWork && hiddenWork[6] == 0 && hiddenWork[7] == 0 &&
+      viewport.viewTarget() == targetAfterPan && !hasZeroIntervalTimer(viewport) &&
+      viewport.viewportPerformanceText().isEmpty() && !renderer->text().contains(QStringLiteral("FPS")) &&
+      !viewport.viewportDetailsText().contains(QCoreApplication::translate("Workbench", "最近测得帧率：%1 FPS").arg(QString{})),
+      "same camera script and visible/hidden FPS have identical GL, presentation, upload and polling work")) return false;
+  const auto hiddenSamples = viewport.presentedFrameIntervalCount();
+  const auto hiddenCounts = counts();
+  showFps->setChecked(true);
+  if (!check(fpsPattern.match(viewport.viewportPerformanceText()).hasMatch() &&
+      viewport.presentedFrameIntervalCount() == hiddenSamples && counts() == hiddenCounts,
+      "restoring FPS immediately uses the live samples without requesting another frame")) return false;
+  if (!check(waitUntil([&] { return viewport.viewportPerformanceText() == idle; }, 2500),
+      "restored metrics return naturally to idle")) return false;
   return true;
 }
 }
@@ -219,7 +316,11 @@ bool runViewportSchedulingSmokeTest(MainWindow &window) {
       return kind == 1 ? viewport->meshRenderingAvailable()
           : kind >= 2 ? viewport->gaussianRenderingAvailable() : viewport->selectableModelAvailable();
     };
-    if (!check(waitUntil(loaded), "actual point/mesh/3DGS/2DGS fixture loaded")) { passed = false; break; }
+    const auto expectedMode = kind == 0 ? NativeViewport::RenderMode::Points
+        : kind == 1 ? NativeViewport::RenderMode::Mesh : NativeViewport::RenderMode::Gaussians;
+    if (!check(waitUntil([&] { return loaded() && viewport->renderMode() == expectedMode; }) &&
+        viewport->sourceHasSurfelAttributes() == (kind == 3),
+        "actual point/mesh/3DGS/2DGS mode loaded, not a point fallback")) { passed = false; break; }
     (void)viewport->grabFramebuffer();
     dispatchFor(400);
     // Exact scheduling contract, not a hardware FPS or power-use estimate.
@@ -227,10 +328,7 @@ bool runViewportSchedulingSmokeTest(MainWindow &window) {
     const auto idleCallbacks = timerCallbacks;
     dispatchFor(120);
     if (!check(timerCallbacks == idleCallbacks, "idle zero-interval callbacks have stopped")) { passed = false; break; }
-    // First vertical slice: a real point-scene navigation burst must become
-    // visibly idle again. The existing four-kind scheduling matrix continues
-    // unchanged after this shared performance-state seam is satisfied.
-    if (kind == 0 && !idlePerformanceLabelRegression(window, *viewport)) { passed = false; break; }
+    if (!idlePerformanceLabelRegression(window, *viewport, kind)) { passed = false; break; }
     const float beforeZoom = viewport->viewDistance();
     const auto beforeFrames = presentedFrames;
     const auto beforePresentations = freshPresentations;
@@ -289,9 +387,13 @@ bool runViewportSchedulingSmokeTest(MainWindow &window) {
     if (!check(waitUntil([&] { return window.isMinimized(); }), "test-owned window minimizes")) { passed = false; break; }
     dispatchFor(60);
     const auto minimizedCallbacks = timerCallbacks;
+    const auto minimizedSamples = viewport->presentedFrameIntervalCount();
+    const auto minimizedMetrics = presentedFrames;
     dispatchFor(120);
-    if (!check(!hasZeroIntervalTimer(*viewport) && timerCallbacks == minimizedCallbacks,
-               "minimization stops zero-interval callbacks, not just painting")) { passed = false; break; }
+    if (!check(!hasZeroIntervalTimer(*viewport) && timerCallbacks == minimizedCallbacks &&
+        viewport->viewportPerformanceText() == idle &&
+        viewport->presentedFrameIntervalCount() == minimizedSamples && presentedFrames == minimizedMetrics,
+        "minimization stops samples and zero-interval callbacks, not just painting")) { passed = false; break; }
     // Queue a real new source while hidden. Its pending GPU work must resume
     // after restoration instead of requiring another user gesture.
     const QString resume = QDir(temporary.path()).filePath(QString("resume-%1.ply").arg(kind));

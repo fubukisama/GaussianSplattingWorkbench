@@ -36,6 +36,14 @@ find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 qt_standard_project_setup()
 
+add_library(gsw_sibr_fps_counter STATIC
+  third_party/sibr-fps-counter/FPSCounter.cpp
+  third_party/sibr-fps-counter/FPSCounter.hpp)
+target_include_directories(gsw_sibr_fps_counter PUBLIC third_party/sibr-fps-counter)
+if(MSVC)
+  target_compile_options(gsw_sibr_fps_counter PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
+
 add_library(gsw_lichtfeld_streaming STATIC
   third_party/lichtfeld-streaming/UploadDrainBudget.cpp
   third_party/lichtfeld-streaming/UploadDrainBudget.h)
@@ -413,6 +421,7 @@ endif()
 
 target_include_directories(GaussianSceneWorkbench PRIVATE src)
 target_link_libraries(GaussianSceneWorkbench PRIVATE
+  gsw_sibr_fps_counter
   gsw_runtime_components
   gsw_blender_view_navigation
   gsw_blender_grid
@@ -451,6 +460,8 @@ install(TARGETS GaussianSceneWorkbench GaussianSceneWorkbenchLauncher
 )
 install(DIRECTORY third_party/spz DESTINATION licenses)
 install(DIRECTORY third_party/gsplat-sh DESTINATION licenses)
+install(FILES third_party/sibr-fps-counter/LICENSE.md third_party/sibr-fps-counter/README.gsw.md
+  DESTINATION licenses/sibr-fps-counter)
 install(DIRECTORY third_party/blender-gizmo DESTINATION licenses)
 install(DIRECTORY third_party/lichtfeld-streaming DESTINATION licenses)
 install(DIRECTORY third_party/blender-navigation DESTINATION licenses)
@@ -1728,7 +1739,7 @@ if(BUILD_TESTING)
     endforeach()
     target_include_directories(gsw_native_viewport_locale_tests PRIVATE src)
     target_link_libraries(gsw_native_viewport_locale_tests PRIVATE
-      gsw_runtime_components gsw_blender_view_navigation gsw_blender_grid gsw_lichtfeld_streaming
+      gsw_sibr_fps_counter gsw_runtime_components gsw_blender_view_navigation gsw_blender_grid gsw_lichtfeld_streaming
       gsw_blender_gizmo_geometry gsw_spz gsw_resource_budget
       Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Svg Qt6::Test)
     target_link_libraries(gsw_native_viewport_locale_tests PRIVATE gsw_native_language_resources)
@@ -2063,6 +2074,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(gsw_frame_rate_counter_tests PRIVATE src)
     target_link_libraries(gsw_frame_rate_counter_tests PRIVATE
+      gsw_sibr_fps_counter
       Qt6::Core
       Qt6::Test
     )

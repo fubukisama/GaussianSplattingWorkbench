@@ -831,6 +831,30 @@ Editing-view orbit, temporary Ctrl+left orbit in trim tools, and the corner navi
 
 Terminology references: [CloudCompare official translations](https://github.com/CloudCompare/CloudCompare/tree/master/qCC/translations), [Agisoft official manuals](https://www.agisoft.com/downloads/user-manuals/), and [Blender Japanese manual](https://docs.blender.org/manual/ja/latest/). Application messages are original translations, not wholesale copies of another application's language library. Loading follows the official [QTranslator documentation](https://doc.qt.io/qt-6/qtranslator.html). Qt base catalogs remain upstream Qt assets; see `THIRD_PARTY_LICENSES.md`.
 
+## Presented-frame metrics
+
+| English | 简体中文 | 日本語 |
+| --- | --- | --- |
+| Show Frame Rate | 显示帧率 | フレームレートを表示 |
+| Mean frame interval | 平均帧间隔 | 平均フレーム間隔 |
+
+The viewport and main status use one presentation counter. During activity the
+readout is `125.00 FPS (8.00 ms)`; a narrow HUD keeps FPS and the details retain
+the interval. The setting is on by default, saved per user, and hides the
+readout without affecting rendering or sampling. Preview pause remains visible.
+Language changes refresh existing controls and details without resetting samples
+or modifying the scene, camera or worker. Milliseconds mean the average interval
+between presented frames, not GPU execution time, monitor Hz or training it/s.
+
+中文：视图中的「显示帧率」默认开启并记住选择，只控制显示。窄视口优先保留
+FPS，详情保留平均呈现帧间隔。它不是 GPU 执行时间、屏幕刷新率或训练速度。
+语言即时切换不重置样本、场景、相机或工作进程。
+
+日本語：「フレームレートを表示」は既定で有効で、表示だけを切り替えて設定を
+保存します。狭いビューポートでは FPS を優先し、平均間隔は詳細に表示します。
+GPU 実行時間・ディスプレイのリフレッシュレート・学習速度とは異なります。
+言語変更でサンプル、シーン、カメラ、学習プロセスは変更しません。
+
 ## Paged mesh preview
 
 Native loading is not required to page ordinary models merely because the

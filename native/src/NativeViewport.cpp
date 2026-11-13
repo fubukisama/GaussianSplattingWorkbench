@@ -545,6 +545,7 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   mViewportStatusLabel = new QLabel(this);
   mViewportStatusLabel->setObjectName(QStringLiteral("viewportStatusLabel"));
   mViewportStatusLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+  mViewportStatusLabel->setTextFormat(Qt::PlainText);
   mViewportDetailsButton = new QToolButton(this);
   mViewportDetailsButton->setObjectName(QStringLiteral("viewportDetailsButton"));
   mViewportDetailsButton->setAutoRaise(true);
@@ -559,17 +560,13 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
     if (mPresentedFrameSerial == mRenderedFrameSerial) return;
     mPresentedFrameSerial = mRenderedFrameSerial;
     if (mRenderDiagnostics) mRenderDiagnostics->presented(this, mPresentedFrameSerial);
-    if (mScene->mRenderedPointCount <= 0 && mScene->mFullResolutionPointCount <= 0 &&
-        mScene->mRenderedMeshIndexCount <= 0 &&
-        mScene->mFullResolutionMeshTriangleCount <= 0 &&
-        !mTrainingGpuPreview.attached()) {
+    if (!presentationCanBeSampled()) {
       pausePresentationMetrics();
       return;
     }
     mFrameRateCounter.frameCompleted(FrameRateCounter::Clock::now());
     mPresentationIdle = false;
     mPresentationWaiting = false;
-    ++mFreshPresentationFrames;
     mPresentationIdleTimer->start();
     emit frameMetricsChanged(mFrameRateCounter.framesPerSecond(),
                              mFrameRateCounter.averageFrameMilliseconds());
@@ -1424,6 +1421,9 @@ void NativeViewport::setSceneObjects(const QList<SceneObject> &objects,
     mPausedPreviewCandidateCount = 0;
     emit processingPreviewPausedChanged(false);
   }
+  if (oldActive != mScene || collectionChanged || visibilityChanged || changedSource ||
+      wasProcessingPreview != mProcessingPreviewPresent)
+    resetPresentationMetrics();
   emit processingPreviewChanged();
   // Collection changes release or replace shared storage immediately. Do not
   // leave residency admission to a periodic timer that can be delayed while
@@ -1508,7 +1508,10 @@ bool NativeViewport::setSceneSelection(const QStringList &ids, const QString &ac
   mSelectedSceneIds = selected;
   mModelSelected = !selected.isEmpty();
   if (mModelSelected) selectModel();
-  if (activeChanged) emit activeSceneObjectChanged(id);
+  if (activeChanged) {
+    resetPresentationMetrics();
+    emit activeSceneObjectChanged(id);
+  }
   publishActiveSceneState();
   notifySceneSelection();
   return true;
@@ -1644,8 +1647,7 @@ void NativeViewport::clearProcessingPreview() {
   mProcessingReferenceSelected = false;
   mProcessingStage.clear();
   mProcessingIteration = mProcessingTotal = mProcessingProgress = -1;
-  mFrameRateCounter = {};
-  pausePresentationMetrics();
+  resetPresentationMetrics();
   mPresentedFrameSerial = mRenderedFrameSerial;
   updateManagedResourceUsage();
   updateFrameRefreshPolicy();
@@ -1782,6 +1784,7 @@ void NativeViewport::restoreProcessingReferenceGpu() {
 }
 
 void NativeViewport::setProcessingPreviewVisible(const bool visible) {
+  const bool visibilityChanged = mProcessingPreviewVisible != visible;
   mProcessingPreviewVisible = visible;
   const auto next = visible && hasProcessingPreview() ? mProcessingScene : mProcessingReferenceScene;
   if (!next || next == mScene) {
@@ -1789,6 +1792,7 @@ void NativeViewport::setProcessingPreviewVisible(const bool visible) {
       restoreProcessingReferenceGpu();
       mProcessingReferenceImage = {};
     } else prepareProcessingReferenceImage();
+    if (visibilityChanged) resetPresentationMetrics();
     updateFrameRefreshPolicy();
     emit processingPreviewChanged();
     update();
@@ -1807,6 +1811,7 @@ void NativeViewport::setProcessingPreviewVisible(const bool visible) {
   mStoredCameraView.reset();
   mPressedButtons = Qt::NoButton;
   mObservationDragActive = false;
+  resetPresentationMetrics();
   if (mProcessingPreviewPresent) {
     mProcessingReferenceImage = {};
     if (mProcessingPreviewView) restoreProcessingView(*mProcessingPreviewView);
@@ -1828,6 +1833,7 @@ void NativeViewport::setProcessingPreviewVisible(const bool visible) {
 void NativeViewport::setProcessingPreviewPaused(const bool paused) {
   if (!mProcessingScene || mProcessingPreviewPaused == paused) return;
   mProcessingPreviewPaused = paused;
+  if (mProcessingPreviewVisible) pausePresentationMetrics();
   if (paused) {
     mTrainingGpuPreviewTimer->stop();
     // An already started read can finish off-thread, but its result must not
@@ -2033,6 +2039,7 @@ void NativeViewport::setScene(const QString &scenePath,
     update();
     return;
   }
+  if (!mRenderingInactiveScene) resetPresentationMetrics();
 
   ++mScene->mSceneGeneration;
   mScene->resourceLoading = false;
@@ -2935,6 +2942,7 @@ qsizetype NativeViewport::cameraCount() const {
 }
 
 void NativeViewport::initializeGL() {
+  resetPresentationMetrics();
   initializeOpenGLFunctions();
   // Retain explicit diagnostic environment ceilings, but route them through
   // the same model-wide controller rather than independent per-cache pools.
@@ -3572,8 +3580,6 @@ bool NativeViewport::eventFilter(QObject *watched, QEvent *event) {
       mFrameRefreshTimer->stop();
       mTrainingGpuPreviewTimer->stop();
       pausePresentationMetrics();
-      refreshViewportPresentation();
-      emit viewportPresentationChanged();
     }
     // Observe final visibility after Qt has completed the top-level transition.
     QTimer::singleShot(0, this, [this] {
@@ -3596,8 +3602,6 @@ void NativeViewport::hideEvent(QHideEvent *event) {
   mFrameRefreshTimer->stop();
   mTrainingGpuPreviewTimer->stop();
   pausePresentationMetrics();
-  refreshViewportPresentation();
-  emit viewportPresentationChanged();
   QOpenGLWidget::hideEvent(event);
 }
 
@@ -4153,7 +4157,12 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             mScene->resourceForcePagedRetry = false;
             mScene->resourceLoadReservation = reservation;
             mScene->resourceUploadDeferred = false;
-            mScene->mScenePath = scenePath;
+             // Progressive task snapshots share one presentation stream. A
+             // different persistent source must not inherit its old cadence.
+             if (!mRenderingInactiveScene && targetScene != mProcessingScene &&
+                 mScene->mScenePath != scenePath)
+               resetPresentationMetrics();
+             mScene->mScenePath = scenePath;
             mScene->metadataSourceSize=QFileInfo(scenePath).size();
             mScene->metadataSourceModified=QFileInfo(scenePath).lastModified().toMSecsSinceEpoch();
             if (continuous) {
@@ -4485,31 +4494,72 @@ bool NativeViewport::frameTimingBurstActive() const {
       (mProcessingActive && mProcessingPreviewVisible && !mProcessingPreviewPaused);
 }
 
+bool NativeViewport::presentationCanBeSampled() const {
+  if (!isVisible() || !window() || window()->isMinimized() ||
+      (mProcessingPreviewVisible &&
+       (mProcessingPreviewPaused || mProcessingPreviewResumePending))) return false;
+  const auto hasGeometry = [](const auto &scene) {
+    return scene->visible && (scene->mRenderedPointCount > 0 ||
+        scene->mFullResolutionPointCount > 0 || scene->mRenderedMeshIndexCount > 0 ||
+        scene->mFullResolutionMeshTriangleCount > 0);
+  };
+  if (hasGeometry(mScene)) return true;
+  if (mScene == mProcessingScene)
+    return trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame();
+  return std::any_of(mSceneStates.cbegin(), mSceneStates.cend(), hasGeometry);
+}
+
 void NativeViewport::pausePresentationMetrics() {
   if (mPresentationIdleTimer) mPresentationIdleTimer->stop();
   mFrameRateCounter.pause();
   mPresentationIdle = true;
   mPresentationWaiting = false;
-  mFreshPresentationFrames = 0;
   refreshViewportPresentation();
   emit viewportPresentationChanged();
 }
 
-QString NativeViewport::viewportPerformanceText() const {
+void NativeViewport::resetPresentationMetrics() {
+  mFrameRateCounter = {};
+  pausePresentationMetrics();
+}
+
+void NativeViewport::setShowFrameRate(const bool visible) {
+  if (mShowFrameRate == visible) return;
+  mShowFrameRate = visible;
+  refreshViewportPresentation();
+  emit viewportPresentationChanged();
+}
+
+QString NativeViewport::frameRatePresentationText(const bool includeInterval) const {
   if (mProcessingPreviewVisible && mProcessingPreviewPaused)
     return QCoreApplication::translate("Workbench", "预览已暂停");
-  if (mPresentationIdle || !isVisible() || (window() && window()->isMinimized()))
+  if (!mShowFrameRate) return {};
+  if (!isVisible() || (window() && window()->isMinimized()))
     return QCoreApplication::translate("Workbench", "空闲");
-  if (mPresentationWaiting)
+  if (mPresentationWaiting || (mProcessingPreviewVisible && mProcessingPreviewResumePending))
     return QCoreApplication::translate("Workbench", "等待新画面…");
-  if (mFreshPresentationFrames < 2 || mFrameRateCounter.framesPerSecond() <= 0.0)
+  if (mPresentationIdle)
+    return QCoreApplication::translate("Workbench", "空闲");
+  if (!mFrameRateCounter.hasFreshInterval())
     return QCoreApplication::translate("Workbench", "帧率统计中…");
-  return QStringLiteral("%1 FPS").arg(mFrameRateCounter.framesPerSecond(), 0, 'f', 0);
+  const QString fps = QString::number(mFrameRateCounter.framesPerSecond(), 'f', 2);
+  return includeInterval
+      ? QCoreApplication::translate("Workbench", "%1 FPS (%2 ms)")
+            .arg(fps, QString::number(mFrameRateCounter.averageFrameMilliseconds(), 'f', 2))
+      : QCoreApplication::translate("Workbench", "%1 FPS").arg(fps);
+}
+
+QString NativeViewport::viewportPerformanceText() const {
+  return frameRatePresentationText(true);
 }
 
 QString NativeViewport::viewportStatusText() const {
+  const auto withPerformance = [this](const QString &mode) {
+    const QString performance = viewportPerformanceText();
+    return performance.isEmpty() ? mode : mode + QStringLiteral(" · ") + performance;
+  };
   if (!mProcessingPreviewVisible && visibleSceneObjectCount() == 0 && sceneObjectCount() > 0)
-    return QCoreApplication::translate("Workbench", "模型已隐藏") + QStringLiteral(" · ") + viewportPerformanceText();
+    return withPerformance(QCoreApplication::translate("Workbench", "模型已隐藏"));
   if (!visibleModelAvailable() && !mTrainingGpuPreview.attached() && mScene->mScenePath.isEmpty())
     return QCoreApplication::translate("Workbench", "未载入场景");
   const QString mode = mProcessingPreviewVisible && hasProcessingPreview()
@@ -4519,7 +4569,7 @@ QString NativeViewport::viewportStatusText() const {
           : mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable()
               ? QCoreApplication::translate("Workbench", "高斯预览")
               : QCoreApplication::translate("Workbench", "点预览");
-  return mode + QStringLiteral(" · ") + viewportPerformanceText();
+  return withPerformance(mode);
 }
 
 QString NativeViewport::viewportDetailsText() const {
@@ -4549,15 +4599,17 @@ QString NativeViewport::viewportDetailsText() const {
   rows << QCoreApplication::translate("Workbench", "场景单位：%1").arg(sceneLengthUnitDescription(sceneReferenceCoordinates()));
   if (mScene->mRenderMode == RenderMode::Gaussians && gaussianRenderingAvailable())
     rows << QCoreApplication::translate("Workbench", "球谐阶数：%1").arg(effectiveShDegree());
-  if (mFrameRateCounter.sampleCount() > 0) {
+  if (mShowFrameRate && mFrameRateCounter.sampleCount() > 0) {
     rows << QString();
     rows << QCoreApplication::translate("Workbench", "最近测得帧率：%1 FPS")
-        .arg(mFrameRateCounter.framesPerSecond(), 0, 'f', 1);
+        .arg(mFrameRateCounter.framesPerSecond(), 0, 'f', 2);
     rows << QCoreApplication::translate("Workbench", "平均帧间隔：%1 ms")
-        .arg(mFrameRateCounter.averageFrameMilliseconds(), 0, 'f', 1);
+        .arg(mFrameRateCounter.averageFrameMilliseconds(), 0, 'f', 2);
   }
-  rows << QString() << QCoreApplication::translate("Workbench", "网格和基准面仅用于显示参考，不代表重建精度。")
-       << QCoreApplication::translate("Workbench", "帧率只统计实际绘制并完成显示的视口帧；空闲时间不计入，也不是训练速度。");
+  rows << QString() << QCoreApplication::translate("Workbench", "网格和基准面仅用于显示参考，不代表重建精度。");
+  if (mShowFrameRate)
+    rows << QCoreApplication::translate("Workbench", "帧率只统计实际绘制并完成显示的视口帧；空闲时间不计入，也不是训练速度。")
+         << QCoreApplication::translate("Workbench", "括号内为呈现帧的平均间隔，不是 GPU 执行时间或显示器刷新率。");
   return rows.join(QLatin1Char('\n'));
 }
 
@@ -4697,10 +4749,16 @@ void NativeViewport::refreshViewportPresentation() {
   const int available = std::max(1, width() - 2 * margin - buttonEdge - AppTheme::scaled(100, scale));
   const QString full = viewportStatusText();
   QString shown = full;
-  if (metrics.horizontalAdvance(shown) > available) shown = viewportPerformanceText();
+  if (metrics.horizontalAdvance(shown) > available) {
+    const QString performance = viewportPerformanceText();
+    if (!performance.isEmpty()) {
+      shown = performance;
+      if (metrics.horizontalAdvance(shown) > available) shown = frameRatePresentationText(false);
+    }
+  }
   shown = metrics.elidedText(shown, Qt::ElideRight, available);
   if (mViewportStatusLabel->text() != shown) mViewportStatusLabel->setText(shown);
-  mViewportStatusLabel->setAccessibleName(full);
+  if (mViewportStatusLabel->accessibleName() != full) mViewportStatusLabel->setAccessibleName(full);
   const QRect labelRect(buttonRect.right() + 5,
       buttonRect.center().y() - (metrics.height() + 4) / 2,
       available, metrics.height() + 4);

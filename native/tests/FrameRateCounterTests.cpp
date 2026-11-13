@@ -11,12 +11,28 @@ class FrameRateCounterTests final : public QObject {
 
 private slots:
   void averagesWarmupFramesWithoutZeroPadding();
+  void firstPresentedFrameOnlyAnchorsTheClock();
   void keepsOnlyTheLatestSixtyFrames();
   void ignoresNonIncreasingFrameCompletions();
   void reportsActualFrameCadence();
   void excludesPausedTimeWithoutResettingMeasuredCadence();
   void pauseIsSafeBeforeAnyFrame();
 };
+
+void FrameRateCounterTests::firstPresentedFrameOnlyAnchorsTheClock() {
+  FrameRateCounter counter;
+  const FrameRateCounter::TimePoint start{};
+  QCOMPARE(counter.sampleCount(), std::size_t(0));
+  QVERIFY(!counter.hasFreshInterval());
+  counter.frameCompleted(start);
+  QCOMPARE(counter.sampleCount(), std::size_t(0));
+  QVERIFY(!counter.hasFreshInterval());
+  counter.frameCompleted(start + std::chrono::milliseconds(8));
+  QCOMPARE(counter.sampleCount(), std::size_t(1));
+  QVERIFY(counter.hasFreshInterval());
+  QCOMPARE(counter.averageFrameMilliseconds(), 8.0);
+  QCOMPARE(counter.framesPerSecond(), 125.0);
+}
 
 void FrameRateCounterTests::averagesWarmupFramesWithoutZeroPadding() {
   FrameRateCounter counter;
@@ -59,6 +75,10 @@ void FrameRateCounterTests::ignoresNonIncreasingFrameCompletions() {
   QCOMPARE(counter.sampleCount(), std::size_t(0));
   QCOMPARE(counter.averageFrameMilliseconds(), 0.0);
   QCOMPARE(counter.framesPerSecond(), 0.0);
+  QVERIFY(!counter.hasFreshInterval());
+  counter.frameCompleted(origin + std::chrono::milliseconds(8));
+  QCOMPARE(counter.sampleCount(), std::size_t(1));
+  QCOMPARE(counter.averageFrameMilliseconds(), 8.0);
 }
 
 void FrameRateCounterTests::reportsActualFrameCadence() {
@@ -84,12 +104,16 @@ void FrameRateCounterTests::excludesPausedTimeWithoutResettingMeasuredCadence() 
   counter.pause();
   QCOMPARE(counter.sampleCount(), std::size_t(2));
   QCOMPARE(counter.averageFrameMilliseconds(), 8.0);
+  QVERIFY(!counter.hasFreshInterval());
   counter.frameCompleted(origin + std::chrono::hours(1));
   QCOMPARE(counter.sampleCount(), std::size_t(2));
   QCOMPARE(counter.framesPerSecond(), 125.0);
+  counter.frameCompleted(origin + std::chrono::hours(1));
+  QVERIFY(!counter.hasFreshInterval());
   counter.frameCompleted(origin + std::chrono::hours(1) + std::chrono::milliseconds(8));
   QCOMPARE(counter.sampleCount(), std::size_t(3));
   QCOMPARE(counter.averageFrameMilliseconds(), 8.0);
+  QVERIFY(counter.hasFreshInterval());
 }
 
 void FrameRateCounterTests::pauseIsSafeBeforeAnyFrame() {

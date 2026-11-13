@@ -1,5 +1,6 @@
 #include "ViewportStatusControlsSmokeTest.h"
 #include "AppLanguage.h"
+#include "AppTheme.h"
 #include "MainWindow.h"
 #include "NativeViewport.h"
 #include "SceneCoordinates.h"
@@ -18,6 +19,7 @@
 #include <QDialog>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QDockWidget>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
@@ -34,10 +36,13 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScopeGuard>
+#include <QScreen>
+#include <QSettings>
 #include <QStandardItemModel>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QToolButton>
+#include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -250,6 +255,160 @@ bool closeDetails(QDialog &dialog) {
 
 QString evidenceDirectory(const QString &output, const QString &locale, const QString &theme) {
   return QDir(output).filePath(QStringLiteral("viewport-status-%1-%2").arg(locale, theme));
+}
+
+bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
+                                   WorkspaceDocument &document, const QString &output,
+                                   const QString &theme, const QStringList &locales) {
+  auto *action = window.findChild<QAction *>(QStringLiteral("showViewportFrameRateAction"));
+  auto *pause = window.findChild<QAction *>(QStringLiteral("pausePreviewAction"));
+  auto *status = viewport.findChild<QLabel *>(QStringLiteral("viewportStatusLabel"));
+  auto *details = viewport.findChild<QToolButton *>(QStringLiteral("viewportDetailsButton"));
+  auto *left = window.findChild<QDockWidget *>(QStringLiteral("projectDock"));
+  auto *right = window.findChild<QDockWidget *>(QStringLiteral("inspectorDock"));
+  const auto key = QStringLiteral("view/showFrameRate");
+  if (!check(action && pause && status && details && left && right && window.screen() &&
+      action->isCheckable() && action->isChecked() &&
+      status->testAttribute(Qt::WA_TransparentForMouseEvents),
+      "visible-by-default frame rate action and non-intercepting status exist")) return false;
+  const auto restore = qScopeGuard([&] { action->setChecked(true); });
+  const QRegularExpression full(QStringLiteral("^[0-9]+\\.[0-9]{2} FPS \\([0-9]+\\.[0-9]{2} ms\\)$"));
+  const auto capture = [&](const QString &locale, const QString &name) {
+    const QString directory = evidenceDirectory(output, locale, theme);
+    return check(QDir().mkpath(directory) &&
+        window.screen()->grabWindow(window.winId()).save(QDir(directory).filePath(name)),
+        "retain actual native FPS window pixels without forcing a GL frame");
+  };
+  const auto wheel = [&](int delta) {
+    const QPointF center = viewport.rect().center();
+    QWheelEvent event(center, viewport.mapToGlobal(center.toPoint()), {}, {0, delta},
+                      Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+    QApplication::sendEvent(&viewport, &event);
+  };
+  const auto active = [&] {
+    quint64 presentations = 0;
+    const auto connection = QObject::connect(&viewport, &NativeViewport::frameMetricsChanged,
+        &viewport, [&] { ++presentations; });
+    const auto disconnect = qScopeGuard([&] { QObject::disconnect(connection); });
+    for (int step = 0; step < 4; ++step) {
+      const auto before = presentations;
+      wheel(step % 2 == 0 ? 120 : -120);
+      if (!waitUntil([&] { return presentations > before; })) return false;
+      if (full.match(viewport.viewportPerformanceText()).hasMatch()) return true;
+    }
+    return false;
+  };
+  const auto exerciseLayout = [&](bool narrow) {
+    for (const auto &locale : locales) {
+      const Snapshot before(document, viewport);
+      const auto samples = viewport.presentedFrameIntervalCount();
+      const auto serial = viewport.renderedFrameSerial();
+      if (!check(AppLanguage::apply(locale, false) && action->text() == translated("显示帧率") &&
+          action->isChecked() && before.unchanged(document, viewport) &&
+          viewport.presentedFrameIntervalCount() == samples && viewport.renderedFrameSerial() == serial,
+          "immediate frame rate menu translation preserves camera, source and counter")) return false;
+      if (!check(active(), "real camera input shows both cadence values")) return false;
+      const QString performance = viewport.viewportPerformanceText();
+      const QString abbreviated = performance.section(QLatin1Char('('), 0, 0).trimmed();
+      if (!check(viewport.viewportDetailsText().contains(performance) &&
+          status->accessibleName() == viewport.viewportStatusText() &&
+          status->text().contains(narrow ? abbreviated : performance) &&
+          viewport.rect().contains(status->geometry()) && viewport.rect().contains(details->geometry()) &&
+          !status->geometry().intersects(details->geometry()) &&
+          (!narrow || !status->text().contains(QStringLiteral(" ms)"))),
+          "wide status shows both values; a narrow status keeps FPS while details keep the interval")) return false;
+      qInfo() << "VIEWPORT_FPS_LAYOUT" << locale << theme << (narrow ? "narrow" : "regular")
+              << "viewport/label widths" << viewport.width() << status->width()
+              << "DPR" << viewport.devicePixelRatioF() << "font" << status->font().pointSizeF()
+              << "samples" << viewport.presentedFrameIntervalCount() << "status" << status->text();
+      if (!capture(locale, narrow ? QStringLiteral("fps-narrow.png") : QStringLiteral("fps-active.png"))) return false;
+      if (!check(waitUntil([&] { return viewport.viewportPerformanceText() == translated("空闲"); }),
+          "actual input settles to localized idle without stale live values")) return false;
+      if (!narrow && !capture(locale, QStringLiteral("fps-idle.png"))) return false;
+    }
+    return true;
+  };
+  const int leftWidth = left->width(), rightWidth = right->width();
+  if (!exerciseLayout(false)) return false;
+  const int originalScale = qApp->property("gswUiScalePercent").toInt();
+  AppTheme::apply(*qApp, 150, false);
+  dispatchFor(80);
+  // Constrain the real central viewport using its existing docks. Use actual
+  // font metrics, not a resolution that only fits one locale/DPI.
+  const QString fpsOnly = QStringLiteral("888.88 FPS");
+  const int scale = qApp->property("gswUiScalePercent").toInt();
+  const int wanted = 2 * AppTheme::scaled(10, scale) + details->width() +
+      AppTheme::scaled(100, scale) + QFontMetrics(status->font()).horizontalAdvance(fpsOnly) + 4;
+  const int extra = std::max(0, viewport.width() - wanted);
+  window.resizeDocks({left, right}, {leftWidth + extra / 2, rightWidth + (extra + 1) / 2}, Qt::Horizontal);
+  dispatchFor(80);
+  const bool narrowGood = exerciseLayout(true);
+  AppTheme::apply(*qApp, originalScale, false);
+  window.resizeDocks({left, right}, {leftWidth, rightWidth}, Qt::Horizontal);
+  dispatchFor(80);
+  if (!narrowGood) return false;
+
+  action->trigger();
+  if (!check(!action->isChecked() && !QSettings().value(key, true).toBool() &&
+      viewport.viewportPerformanceText().isEmpty(), "native action saves the hidden frame rate preference")) return false;
+  action->trigger();
+  if (!check(action->isChecked() && QSettings().value(key, false).toBool(),
+      "native action saves the restored preference")) return false;
+
+  // Observe an actual PLY task snapshot, no worker, GPU interop fixture, or
+  // source-file writes. The same presented-frame gate handles either producer.
+  const QString source = viewport.scenePath();
+  const auto modelBefore = document.sceneCollectionJson();
+  viewport.beginProcessingPreview();
+  const auto endPreview = qScopeGuard([&] {
+    viewport.finishProcessingPreview(true, false);
+    viewport.clearProcessingPreview();
+  });
+  viewport.setPreviewScene(source, viewport.renderedPointCount());
+  if (!check(waitUntil([&] { return viewport.hasProcessingPreview() && pause->isEnabled(); }) &&
+      active(), "a real task snapshot is presented and measured before freezing")) return false;
+  quint64 updates = 0;
+  bool observeFirst = false, firstAnchored = false;
+  std::size_t expectedSamples = 0;
+  const auto metrics = QObject::connect(&viewport, &NativeViewport::frameMetricsChanged, &viewport,
+      [&] {
+        ++updates;
+        if (!observeFirst) return;
+        observeFirst = false;
+        firstAnchored = viewport.presentedFrameIntervalCount() == expectedSamples &&
+            viewport.viewportPerformanceText() == translated("帧率统计中…");
+      });
+  const auto disconnect = qScopeGuard([&] { QObject::disconnect(metrics); });
+  const auto beforePause = viewport.presentedFrameIntervalCount();
+  const auto beforePauseUpdates = updates;
+  pause->trigger();
+  dispatchFor(500);
+  if (!check(viewport.processingPreviewPaused() && pause->isChecked() &&
+      viewport.viewportPerformanceText() == translated("预览已暂停") &&
+      viewport.presentedFrameIntervalCount() == beforePause && updates == beforePauseUpdates &&
+      document.sceneCollectionJson() == modelBefore,
+      "freezing a task preview does not count its re-presentation or alter project objects")) return false;
+  if (!capture(AppLanguage::current(), QStringLiteral("fps-preview-paused.png"))) return false;
+  observeFirst = true;
+  firstAnchored = false;
+  expectedSamples = beforePause;
+  pause->trigger();
+  if (!check(waitUntil([&] { return !viewport.processingPreviewPaused() && !observeFirst; }) && firstAnchored,
+      "first presented frame on resume is an anchor, not a pause interval")) return false;
+  if (!check(active(), "new input supplies valid intervals again after resume")) return false;
+  viewport.hide();
+  const auto beforeHide = viewport.presentedFrameIntervalCount();
+  const auto beforeHideUpdates = updates;
+  dispatchFor(500);
+  const bool hidden = viewport.viewportPerformanceText() == translated("空闲") &&
+      viewport.presentedFrameIntervalCount() == beforeHide && updates == beforeHideUpdates;
+  observeFirst = true;
+  firstAnchored = false;
+  expectedSamples = beforeHide;
+  viewport.show();
+  if (!check(hidden && waitUntil([&] { return !observeFirst; }) && firstAnchored,
+      "hidden viewport stops sampling; first shown frame reanchors without a hidden interval")) return false;
+  return check(active(), "real cadence resumes after the viewport is shown");
 }
 
 struct GridInk final {
@@ -642,6 +801,7 @@ bool runViewportStatusControlsSmokeTest(MainWindow &window) {
     }) || !check(before.unchanged(*document, *viewport), "details menu does not mutate project or camera")) return false;
     if (!saveImage(window, evidenceDirectory(output, locale, theme), QStringLiteral("full-window.png"))) return false;
   }
+  if (!frameRatePresentationControls(window, *viewport, *document, output, theme, locales)) return false;
 
   // Bounded second known-unit source prevents an accidental hardcoded 1 m/u.
   // Compare its own reference ratio and source poses, never its raw view camera

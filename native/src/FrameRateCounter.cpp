@@ -4,7 +4,10 @@
 
 namespace gsw {
 
-void FrameRateCounter::pause() { mLastCompletionTime.reset(); }
+void FrameRateCounter::pause() {
+  mLastCompletionTime.reset();
+  mHasFreshInterval = false;
+}
 
 void FrameRateCounter::frameCompleted(const TimePoint completionTime) {
   if (!mLastCompletionTime.has_value()) {
@@ -12,40 +15,23 @@ void FrameRateCounter::frameCompleted(const TimePoint completionTime) {
     return;
   }
 
-  const double milliseconds =
-      std::chrono::duration<double, std::milli>(completionTime -
-                                                *mLastCompletionTime)
-          .count();
-  if (!std::isfinite(milliseconds) || milliseconds <= 0.0) {
-    return;
-  }
+  if (completionTime <= *mLastCompletionTime) return;
+  const double seconds =
+      std::chrono::duration<double>(completionTime - *mLastCompletionTime).count();
+  if (!std::isfinite(seconds) || seconds <= 0.0) return;
   mLastCompletionTime = completionTime;
-  addFrameIntervalMilliseconds(milliseconds);
+  mCounter.update(seconds);
+  mHasFreshInterval = true;
 }
 
-void FrameRateCounter::addFrameIntervalMilliseconds(
-    const double milliseconds) {
-  if (mSampleCount == kSmoothingWindow) {
-    mFrameIntervalSum -= mFrameIntervals[mNextSample];
-  } else {
-    ++mSampleCount;
-  }
-  mFrameIntervals[mNextSample] = milliseconds;
-  mFrameIntervalSum += milliseconds;
-  mNextSample = (mNextSample + 1) % kSmoothingWindow;
-}
-
-std::size_t FrameRateCounter::sampleCount() const { return mSampleCount; }
+std::size_t FrameRateCounter::sampleCount() const { return mCounter.sampleCount(); }
 
 double FrameRateCounter::averageFrameMilliseconds() const {
-  return mSampleCount > 0
-             ? mFrameIntervalSum / static_cast<double>(mSampleCount)
-             : 0.0;
+  return 1000.0 * mCounter.averageFrameSeconds();
 }
 
 double FrameRateCounter::framesPerSecond() const {
-  const double milliseconds = averageFrameMilliseconds();
-  return milliseconds > 0.0 ? 1000.0 / milliseconds : 0.0;
+  return mCounter.framesPerSecond();
 }
 
 } // namespace gsw

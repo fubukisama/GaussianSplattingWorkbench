@@ -237,6 +237,33 @@ appropriate separate permission from the relevant rights holders.
 
 日本語：GLSL の SH 評価は gsplat の Apache-2.0 ソースを上記コミットに固定して直接移植しています。著作権・変更通知・ライセンスを保持し配布物に同梱します。CUDA/PyTorch ランタイム依存は追加しません。
 
+## SIBR presented-frame counter / SIBR 呈现帧计数 / SIBR 表示フレーム計測
+
+`native/third_party/sibr-fps-counter/` directly adapts the ring update and
+mean/reciprocal from `src/core/view/FPSCounter.hpp` and `FPSCounter.cpp` of
+[Inria SIBR Core](https://gitlab.inria.fr/sibr/sibr_core) at
+`0103f7fd75deb0f392c339c74a4ec1cf728e31d1`. That official revision's
+[Apache-2.0 grant](https://gitlab.inria.fr/sibr/sibr_core/-/blob/0103f7fd75deb0f392c339c74a4ec1cf728e31d1/LICENSE.md)
+covers these core files, not separately licensed projects under `src/projects`.
+The retained headers refer to LICENSE.md and include the original wording;
+the 2024 root license change, exact file hashes and modifications are recorded
+in [the adaptation provenance](native/third_party/sibr-fps-counter/README.gsw.md).
+The original Inria/GRAPHDECO copyright, full upstream license and modification
+notices accompany the binary and corresponding source in
+`licenses/sibr-fps-counter/` and `source/native/third_party/sibr-fps-counter/`.
+No separate upstream NOTICE is present at this revision. The combined desktop
+program remains GPL-3.0-or-later, with the Apache-2.0 notices retained.
+No SIBR renderer, ImGui, or research-licensed training code is incorporated.
+
+中文：原生视口直接移植上述官方提交的 SIBR Core 60 样本计数核心，保留 Inria／
+GRAPHDECO 原声明、变更说明和完整 Apache-2.0 许可。仅适用于选定的 core 文件，
+不改变 Gaussian-Splatting 训练组件的许可，也不引入 SIBR 渲染器或 ImGui。
+
+日本語：上記の公式コミットから SIBR Core の 60 サンプル計測処理を直接移植
+しました。Inria／GRAPHDECO の原通知・変更通知・Apache-2.0 全文を保持し、
+配布物に同梱します。学習コンポーネントのライセンスは変更せず、SIBR の
+レンダラーや ImGui は組み込みません。
+
 ## LichtFeld Studio Reference
 
 The native desktop now directly adapts LichtFeld Studio's whole-page byte-budget

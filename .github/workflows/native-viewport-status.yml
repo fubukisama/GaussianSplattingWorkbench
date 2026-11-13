@@ -114,7 +114,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Viewport status configure failed.' }
           $targets = @('gsw_workspace_scene_format_tests')
           if ($env:GSW_STATUS_SCOPE -eq 'all') {
-            $targets += @('GaussianSceneWorkbench', 'gsw_frame_rate_counter_tests', 'gsw_recovery_store_tests', 'gsw_viewport_camera_tests')
+            $targets += @('GaussianSceneWorkbench', 'gsw_frame_rate_counter_tests', 'gsw_recovery_store_tests', 'gsw_viewport_camera_tests', 'gsw_native_viewport_locale_tests')
           }
           elseif ($env:GSW_STATUS_SCOPE -eq 'ci-repair') {
             $targets += @('GaussianSceneWorkbench', 'gsw_runtime_decoupling_ui_tests')
@@ -157,7 +157,7 @@ jobs:
         if: ${{ !cancelled() && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
         shell: pwsh
         run: |
-          $contracts = '^(native_viewport_scheduling_(light|dark)|frame_rate_counter|recovery_store|viewport_camera)$'
+          $contracts = '^(native_viewport_scheduling_(light|dark)|native_viewport_locale_contract|frame_rate_counter|recovery_store|viewport_camera)$'
           $repeat = @()
           if ($env:GSW_STATUS_SCOPE -eq 'ci-repair') {
             # Match the unoverridden platform style used by the full suite.
