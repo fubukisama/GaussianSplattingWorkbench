@@ -580,6 +580,7 @@ private:
   [[nodiscard]] bool hasPendingFrameUploads() const;
   [[nodiscard]] bool frameTimingBurstActive() const;
   [[nodiscard]] bool presentationCanBeSampled() const;
+  [[nodiscard]] bool liveFrameRefreshAllowed() const;
   [[nodiscard]] QString frameRatePresentationText(bool includeInterval) const;
   void refreshViewportPresentation();
   void pausePresentationMetrics();
@@ -836,6 +837,7 @@ private:
   bool mZoomToCursorEnabled = true;
   FrameRateCounter mFrameRateCounter;
   QTimer *mPresentationIdleTimer = nullptr;
+  QTimer *mLiveFrameRefreshTimer = nullptr;
   QLabel *mViewportStatusLabel = nullptr;
   QToolButton *mViewportDetailsButton = nullptr;
   bool mPresentationIdle = true;

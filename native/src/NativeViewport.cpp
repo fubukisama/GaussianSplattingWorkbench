@@ -68,6 +68,8 @@ namespace gsw {
 
 namespace {
 constexpr float kPi = 3.14159265358979323846F;
+constexpr int kLiveRefreshDelayMs = 1;
+constexpr int kProcessingRefreshIntervalMs = 33;
 
 bool meshPagingQaEnabled() {
   static const bool enabled = qEnvironmentVariableIntValue("GSW_MESH_PAGING_QA_DIAGNOSTICS") != 0;
@@ -512,7 +514,7 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   mTrainingGpuPreviewTimer = new QTimer(this);
   mTrainingGpuPreviewTimer->setObjectName(QStringLiteral("trainingPreviewPollTimer"));
   mTrainingGpuPreviewTimer->setTimerType(Qt::PreciseTimer);
-  mTrainingGpuPreviewTimer->setInterval(33);
+  mTrainingGpuPreviewTimer->setInterval(kProcessingRefreshIntervalMs);
   connect(mTrainingGpuPreviewTimer, &QTimer::timeout, this,
           [this] {
             if (mProcessingPreviewVisible && isVisible() && !window()->isMinimized()) update();
@@ -525,6 +527,14 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
           [this] {
             if (isVisible() && !window()->isMinimized()) update();
           });
+  mLiveFrameRefreshTimer = new QTimer(this);
+  mLiveFrameRefreshTimer->setObjectName(QStringLiteral("viewportLiveFrameRefreshTimer"));
+  mLiveFrameRefreshTimer->setSingleShot(true);
+  mLiveFrameRefreshTimer->setTimerType(Qt::PreciseTimer);
+  mLiveFrameRefreshTimer->setInterval(kLiveRefreshDelayMs);
+  connect(mLiveFrameRefreshTimer, &QTimer::timeout, this, [this] {
+    if (liveFrameRefreshAllowed()) update();
+  });
   mPresentationIdleTimer = new QTimer(this);
   mPresentationIdleTimer->setObjectName(QStringLiteral("viewportPresentationIdleTimer"));
   mPresentationIdleTimer->setSingleShot(true);
@@ -532,8 +542,8 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
   connect(mPresentationIdleTimer, &QTimer::timeout, this, [this] {
     if (frameTimingBurstActive()) {
       mPresentationWaiting = true;
-      // Recheck a stalled drag/worker without requesting a GL frame. A button
-      // release or completed worker may not itself produce another image.
+      // Recheck a stalled live frame, drag or worker without inventing a
+      // presentation or starting a second refresh loop.
       mPresentationIdleTimer->start();
     } else {
       pausePresentationMetrics();
@@ -572,6 +582,11 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
                              mFrameRateCounter.averageFrameMilliseconds());
     refreshViewportPresentation();
     emit viewportPresentationChanged();
+    // Like the SIBR viewer loop, request the next image after presentation.
+    // Yield to Qt input and composition, and never add another cadence while
+    // uploads or the live training mapping already drive the viewport.
+    if (liveFrameRefreshAllowed())
+      mLiveFrameRefreshTimer->start(mProcessingActive ? kProcessingRefreshIntervalMs : kLiveRefreshDelayMs);
   });
   const QString diagnosticsRoot = qEnvironmentVariable("GSW_RENDER_DIAGNOSTICS_DIR");
   if (!diagnosticsRoot.isEmpty())
@@ -4492,7 +4507,8 @@ bool NativeViewport::hasPendingFrameUploads() const {
 }
 
 bool NativeViewport::frameTimingBurstActive() const {
-  return hasPendingFrameUploads() || mPressedButtons != Qt::NoButton ||
+  return (mShowFrameRate && presentationCanBeSampled()) ||
+      hasPendingFrameUploads() || mPressedButtons != Qt::NoButton ||
       mModelDragActive || mSelectionGestureActive || mObservationDragActive || mViewSnapTimer->isActive() ||
       (mProcessingActive && mProcessingPreviewVisible && !mProcessingPreviewPaused);
 }
@@ -4501,6 +4517,8 @@ bool NativeViewport::presentationCanBeSampled() const {
   if (!isVisible() || !window() || window()->isMinimized() ||
       (mProcessingPreviewVisible &&
        (mProcessingPreviewPaused || mProcessingPreviewResumePending))) return false;
+  if (mProcessingActive && mProcessingPreviewVisible && !hasProcessingPreview() &&
+      mScene->processingGpuSuspended && !mProcessingReferenceImage.isNull()) return false;
   const auto hasGeometry = [](const auto &scene) {
     return scene->visible && (scene->mRenderedPointCount > 0 ||
         scene->mFullResolutionPointCount > 0 || scene->mRenderedMeshIndexCount > 0 ||
@@ -4512,7 +4530,13 @@ bool NativeViewport::presentationCanBeSampled() const {
   return std::any_of(mSceneStates.cbegin(), mSceneStates.cend(), hasGeometry);
 }
 
+bool NativeViewport::liveFrameRefreshAllowed() const {
+  return mShowFrameRate && !mFrameRefreshTimer->isActive() &&
+      !mTrainingGpuPreviewTimer->isActive() && presentationCanBeSampled();
+}
+
 void NativeViewport::pausePresentationMetrics() {
+  if (mLiveFrameRefreshTimer) mLiveFrameRefreshTimer->stop();
   if (mPresentationIdleTimer) mPresentationIdleTimer->stop();
   mFrameRateCounter.pause();
   mPresentationIdle = true;
@@ -4529,6 +4553,12 @@ void NativeViewport::resetPresentationMetrics() {
 void NativeViewport::setShowFrameRate(const bool visible) {
   if (mShowFrameRate == visible) return;
   mShowFrameRate = visible;
+  if (!visible) {
+    mLiveFrameRefreshTimer->stop();
+  } else if (liveFrameRefreshAllowed()) {
+    // A settled on-demand viewport has no swap to restart the live loop.
+    update();
+  }
   refreshViewportPresentation();
   emit viewportPresentationChanged();
 }
@@ -4542,7 +4572,9 @@ QString NativeViewport::frameRatePresentationText(const bool includeInterval) co
   if (mPresentationWaiting || (mProcessingPreviewVisible && mProcessingPreviewResumePending))
     return QCoreApplication::translate("Workbench", "等待新画面…");
   if (mPresentationIdle)
-    return QCoreApplication::translate("Workbench", "空闲");
+    return presentationCanBeSampled()
+        ? QCoreApplication::translate("Workbench", "等待新画面…")
+        : QCoreApplication::translate("Workbench", "空闲");
   if (!mFrameRateCounter.hasFreshInterval())
     return QCoreApplication::translate("Workbench", "帧率统计中…");
   const QString fps = QString::number(mFrameRateCounter.framesPerSecond(), 'f', 2);
@@ -4611,7 +4643,7 @@ QString NativeViewport::viewportDetailsText() const {
   }
   rows << QString() << QCoreApplication::translate("Workbench", "网格和基准面仅用于显示参考，不代表重建精度。");
   if (mShowFrameRate)
-    rows << QCoreApplication::translate("Workbench", "帧率只统计实际绘制并完成显示的视口帧；空闲时间不计入，也不是训练速度。")
+    rows << QCoreApplication::translate("Workbench", "帧率只统计新绘制并完成显示的视口帧，不代表训练速度。")
          << QCoreApplication::translate("Workbench", "括号内为呈现帧的平均间隔，不是 GPU 执行时间或显示器刷新率。");
   return rows.join(QLatin1Char('\n'));
 }
@@ -4785,10 +4817,9 @@ void NativeViewport::refreshViewportPresentation() {
 void NativeViewport::updateFrameRefreshPolicy() {
   // The optimizer has priority while a task is running. This changes actual
   // drawing cadence only; FrameRateCounter still counts completed frames.
-  mFrameRefreshTimer->setInterval(mProcessingActive ? 33 : 0);
+  mFrameRefreshTimer->setInterval(mProcessingActive ? kProcessingRefreshIntervalMs : 0);
   // Only a live worker mapping requires polling. Resident scenes and snapshots
   // are event-driven, including async completion and navigation update() calls.
-  mTrainingGpuPreviewTimer->setInterval(33);
   const bool exposed = isVisible() && window() && !window()->isMinimized();
   const bool pollTraining = exposed && mProcessingActive && mProcessingPreviewVisible &&
       !mProcessingPreviewPaused && (mPendingTrainingGpuPreviewDescriptor.has_value() ||
@@ -4803,6 +4834,8 @@ void NativeViewport::updateFrameRefreshPolicy() {
   } else if (!shouldRefreshContinuously && mFrameRefreshTimer->isActive()) {
     mFrameRefreshTimer->stop();
   }
+  if (mLiveFrameRefreshTimer->isActive() && !liveFrameRefreshAllowed())
+    mLiveFrameRefreshTimer->stop();
 }
 
 void NativeViewport::notifyEditState() {

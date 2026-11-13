@@ -597,6 +597,13 @@ bool runRenderDiagnosticsSmoke(MainWindow &window) {
   if (!check(viewport && document && screen && !output.isEmpty() &&
              QDir::isAbsolutePath(output) && QDir().mkpath(output),
              "real window services and explicit absolute diagnostic output directory")) return false;
+  // This diagnostic specifically captures an already-presented image after
+  // 400 ms without redraws. Exercise the real on-demand preference.
+  auto *showFps = window.findChild<QAction *>(QStringLiteral("showViewportFrameRateAction"));
+  if (!check(showFps, "native frame rate preference exists")) return false;
+  const bool fpsWasShown = showFps->isChecked();
+  showFps->setChecked(false);
+  const auto restoreFps = qScopeGuard([&] { showFps->setChecked(fpsWasShown); });
   QTemporaryDir temporary(QDir(QCoreApplication::applicationDirPath()).filePath("render-diagnostics-XXXXXX"));
   if (!check(temporary.isValid(), "isolated synthetic input directory")) return false;
   const auto available = screen->availableGeometry();

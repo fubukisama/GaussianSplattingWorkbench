@@ -1,6 +1,7 @@
 #include "UiPerformanceSmokeTest.h"
 #include "NativeViewport.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QCryptographicHash>
 #include <QDataStream>
@@ -263,6 +264,10 @@ bool prepareUiPerformanceWindow(QWidget &window) {
       !qApp->arguments().contains(QStringLiteral("--smoke-test-ui-performance")) ||
       qApp->property("gswSmokeSettingsDirectory").toString().isEmpty() ||
       window.isVisible() || !viewport || !viewport->scenePath().isEmpty() || viewport->trainingGpuPreviewActive()) return false;
+  // This frozen protocol measures on-demand navigation and idle work. The
+  // shared QA source also compiles on the pre-FPS-toggle, on-demand baseline.
+  if (auto *showFps = window.findChild<QAction *>(QStringLiteral("showViewportFrameRateAction")))
+    showFps->setChecked(false);
   for (auto *dock : window.findChildren<QDockWidget *>()) dock->hide();
   for (auto *bar : window.findChildren<QToolBar *>()) bar->hide();
   for (auto *status : window.findChildren<QStatusBar *>()) status->hide();

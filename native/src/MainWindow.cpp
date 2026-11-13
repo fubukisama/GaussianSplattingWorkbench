@@ -2084,6 +2084,8 @@ void MainWindow::createMenus() {
   viewMenu->addAction(mViewportDetailsAction);
   auto *showFrameRate = AppLanguage::text(viewMenu->addAction(QString()),
       AppLanguage::source("显示帧率"));
+  AppLanguage::bind(showFrameRate, "toolTip", AppLanguage::source(
+      "开启后，静止时也会刷新视口并测量帧率。关闭后恢复按需刷新。"));
   showFrameRate->setObjectName(QStringLiteral("showViewportFrameRateAction"));
   showFrameRate->setCheckable(true);
   const auto frameRateKey = QStringLiteral("view/showFrameRate");

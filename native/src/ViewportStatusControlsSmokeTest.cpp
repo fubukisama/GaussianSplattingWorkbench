@@ -312,6 +312,7 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
       const auto samples = viewport.presentedFrameIntervalCount();
       const auto serial = viewport.renderedFrameSerial();
       if (!check(AppLanguage::apply(locale, false) && action->text() == translated("显示帧率") &&
+          action->toolTip() == translated("开启后，静止时也会刷新视口并测量帧率。关闭后恢复按需刷新。") &&
           action->isChecked() && before.unchanged(document, viewport) &&
           viewport.presentedFrameIntervalCount() == samples && viewport.renderedFrameSerial() == serial,
           "immediate frame rate menu translation preserves camera, source and counter")) return false;
@@ -343,9 +344,16 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
                        status->font().pointSizeF() >= 14.0)),
           "status shows complete cadence or falls back to details without misleading partial numbers")) return false;
       if (!capture(locale, QStringLiteral("fps-%1.png").arg(layout))) return false;
-      if (!check(waitUntil([&] { return viewport.viewportPerformanceText() == translated("空闲"); }),
-          "actual input settles to localized idle without stale live values")) return false;
-      if (expected == CadenceLayout::Full && !capture(locale, QStringLiteral("fps-idle.png"))) return false;
+      if (expected == CadenceLayout::Full) {
+        dispatchFor(500);
+        const auto stationarySerial = viewport.renderedFrameSerial();
+        if (!check(waitUntil([&] {
+              return viewport.renderedFrameSerial() > stationarySerial &&
+                  full.match(viewport.viewportPerformanceText()).hasMatch();
+            }) && status->text().contains(viewport.viewportPerformanceText()),
+            "stationary localized status still shows freshly measured FPS")) return false;
+        if (!capture(locale, QStringLiteral("fps-stationary.png"))) return false;
+      }
     }
     return true;
   };
@@ -423,9 +431,12 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
   const auto beforePause = viewport.presentedFrameIntervalCount();
   const auto beforePauseUpdates = updates;
   pause->trigger();
+  dispatchFor(100); // Allow the single repaint that displays the paused state.
+  const auto pausedSerial = viewport.renderedFrameSerial();
   dispatchFor(500);
   if (!check(viewport.processingPreviewPaused() && pause->isChecked() &&
       viewport.viewportPerformanceText() == translated("预览已暂停") &&
+      viewport.renderedFrameSerial() == pausedSerial &&
       viewport.presentedFrameIntervalCount() == beforePause && updates == beforePauseUpdates &&
       document.sceneCollectionJson() == modelBefore,
       "freezing a task preview does not count its re-presentation or alter project objects")) return false;
@@ -436,12 +447,15 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
   pause->trigger();
   if (!check(waitUntil([&] { return !viewport.processingPreviewPaused() && !observeFirst; }) && firstAnchored,
       "first presented frame on resume is an anchor, not a pause interval")) return false;
-  if (!check(active(), "new input supplies valid intervals again after resume")) return false;
+  if (!check(waitUntil([&] { return full.match(viewport.viewportPerformanceText()).hasMatch(); }),
+             "real cadence resumes after unpausing without another camera gesture")) return false;
   viewport.hide();
   const auto beforeHide = viewport.presentedFrameIntervalCount();
   const auto beforeHideUpdates = updates;
+  const auto beforeHideSerial = viewport.renderedFrameSerial();
   dispatchFor(500);
   const bool hidden = viewport.viewportPerformanceText() == translated("空闲") &&
+      viewport.renderedFrameSerial() == beforeHideSerial &&
       viewport.presentedFrameIntervalCount() == beforeHide && updates == beforeHideUpdates;
   observeFirst = true;
   firstAnchored = false;
@@ -449,9 +463,10 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
   viewport.show();
   if (!check(hidden && waitUntil([&] { return !observeFirst; }) && firstAnchored,
       "hidden viewport stops sampling; first shown frame reanchors without a hidden interval")) return false;
-  if (!check(active(), "real cadence resumes after the viewport is shown")) return false;
+  if (!check(waitUntil([&] { return full.match(viewport.viewportPerformanceText()).hasMatch(); }),
+             "real cadence resumes when the viewport is shown without input")) return false;
   qInfo() << "VIEWPORT_FPS_CONTROLS PASS:" << theme
-          << "three locales, 150% narrow/details fallback, pause, hide, resume";
+          << "three locales, stationary FPS, 150% narrow/details fallback, pause, hide, resume";
   return true;
 }
 
@@ -805,20 +820,20 @@ bool runViewportStatusControlsSmokeTest(MainWindow &window) {
 
   for (const QString &locale : locales) {
     if (!check(AppLanguage::apply(locale, false), "switch details and compact status language")) return false;
-    if (!check(waitUntil([&] { return viewport->viewportPerformanceText() == translated("空闲"); }, 1100),
-               "real displayed frames settle to idle before inspecting details")) return false;
+    if (!check(waitUntil([&] { return viewport->viewportPerformanceText().contains(QStringLiteral(" FPS (")); }),
+               "stationary viewport reports its actual cadence before inspecting details")) return false;
     const Snapshot before(*document, *viewport);
     if (!check(status->isVisible() && detailsButton->isVisible() &&
-        status->text().contains(translated("空闲")) &&
-        viewport->viewportStatusText().contains(translated("空闲")),
-        "compact native status exposes idle rather than stale live FPS")) return false;
+        status->text().contains(QStringLiteral(" FPS")) &&
+        status->accessibleName() == viewport->viewportStatusText(),
+        "compact native status and its accessible name expose the same live cadence")) return false;
     if (!dialogExercise(window, "viewportDetailsDialog", [&] { detailsAction->trigger(); }, [&](QDialog &dialog) {
       auto *plain = dialog.findChild<QPlainTextEdit *>(QStringLiteral("viewportDetailsText"));
       if (!check(plain && plain->isReadOnly(), "menu action opens native read-only details")) return false;
       const QString value = plain->toPlainText();
       if (!check(value == viewport->viewportDetailsText() &&
           value.contains(translated("网格和基准面仅用于显示参考，不代表重建精度。")) &&
-          value.contains(translated("帧率只统计实际绘制并完成显示的视口帧；空闲时间不计入，也不是训练速度。")) &&
+          value.contains(translated("帧率只统计新绘制并完成显示的视口帧，不代表训练速度。")) &&
           value.contains(sceneLengthUnitDescription(viewport->sceneReferenceCoordinates())),
           "details use current language and actual source provenance, with no accuracy or training-speed claim")) return false;
       if (locale == locales.first()) {

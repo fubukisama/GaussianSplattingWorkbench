@@ -10,6 +10,8 @@
   固定网格过密时淡出，不偷偷换成更粗的间距；超出 GPU 表示范围时给出说明。
 - **视图 → 视口详情**，或视口底部的信息按钮：查看当前网格间距、视点到观察中心的
   距离、基准面、尺度来源及最近的帧率统计。详情可在导航时保持打开，并复制当前内容。
+- **视图 → 显示帧率**：开启时，载入模型的视口即使不操作也继续绘制并显示实测 FPS。
+  关闭后恢复按需绘制，可减少静止时的 GPU 开销。
 - 已知物理尺度时，可在场景单位、mm、cm、m 之间切换显示。未知尺度仍显示原始单位
   `u`，不允许据此声明米制。暂时缺少尺度元数据时，保存的显示单位偏好保留，但有效显示
   仍为 `u`。来源声明的尺度不是独立精度检核。
@@ -27,9 +29,9 @@
 透视网格不是整张屏幕通用的二维比例尺。
 
 默认状态只显示渲染模式与性能状态。FPS 只统计新绘制且完成视口呈现的帧；普通窗口合成
-复用旧画面时不新增样本。停止重绘后显示“空闲”，处理活动尚在等待新画面时可显示
-“等待新画面…”，暂停预览有独立状态。详情中的最近测量可保留用于查看，不能当作当前持续
-帧率。平均帧间隔不是 GPU 内核耗时，也不是训练速度；不会仅为更新数字持续重绘 GPU。
+复用旧画面时不新增样本。隐藏、最小化、没有可显示的模型或暂停预览时不启动实时刷新。
+等待下一帧时可显示“等待新画面…”，暂停预览有独立状态。详情中保留的最近测量不代表当前
+仍在绘制。平均帧间隔不是 GPU 内核耗时、显示器刷新率或训练速度。
 
 同一显示能力适用于点云、网格、3DGS 和 2DGS。文档和静态检查不替代真实 Windows/OpenGL
 窗口验收；显示正确不证明训练质量或实体尺寸精度。
@@ -47,6 +49,9 @@
   footer, for spacing, camera-to-target distance, reference plane, scale
   provenance and recent frame statistics. Leave the read-only dialog open while
   navigating, or copy its current contents.
+- Enable **View → Show Frame Rate** to keep a loaded viewport rendering and
+  measuring FPS without input. Turn it off to return to on-demand rendering
+  and reduce idle GPU use.
 - With a declared physical scale, choose scene units, mm, cm or m for display.
   Unknown scale remains `u`; the control cannot declare metres. If scale
   metadata is temporarily unavailable, a saved unit preference is retained but
@@ -73,12 +78,11 @@ is not a universal screen-space ruler.
 
 The default caption contains render mode and performance state. FPS samples
 only newly rendered viewport images that complete presentation; composing a
-cached image does not add a sample. It becomes **Idle** when redraws stop, may
-show **Waiting for a new frame…** during an active wait, and has a separate
-preview-paused state. Recent measurements remain inspectable in Details, not
-as a claim of ongoing frame cadence. Mean frame interval is neither GPU kernel
-time nor training speed. The GPU is not redrawn continuously just to animate
-the counter.
+cached image does not add a sample. Hidden, minimized, empty and paused views
+do not run live refresh. The UI distinguishes a wait for a new frame from a
+paused preview. Recent measurements in Details are not a claim that rendering
+is still running. Mean frame interval is not GPU kernel time, display refresh
+rate or training speed.
 
 The controls are shared by point-cloud, mesh, 3DGS and 2DGS rendering. This
 document and static inspection do not replace real Windows/OpenGL acceptance;
@@ -96,6 +100,8 @@ correct display does not establish training quality or physical accuracy.
 - **ビュー → ビューポートの詳細**、または下部の情報ボタンで、間隔、視点から注視点
   までの距離、基準面、尺度の由来、直近のフレーム統計を確認できます。読取り専用の
   詳細を開いたまま移動でき、現在の内容をコピーできます。
+- **ビュー → フレームレートを表示**をオンにすると、モデルを表示中は操作しなくても
+  描画と計測を続けます。オフにすると必要なときだけ描画し、静止時の GPU 負荷を抑えます。
 - 物理尺度が宣言されている場合のみ、シーン単位・mm・cm・m を表示用に選べます。
   不明な尺度は元の単位 `u` のままで、メートルとは推定しません。尺度情報が一時的に
   不明でも保存済みの単位の選択は保持し、有効な表示は `u` にします。出典の尺度宣言と
@@ -116,10 +122,10 @@ Z=0 の基準面、軸方向の平行投影に対応する平面、GSW の背景
 二次元の縮尺ではありません。
 
 通常の表示は描画モードと性能状態だけです。FPS は新たに描画して表示が完了した
-ビューポート画像だけを数え、キャッシュ画像のウィンドウ合成は数えません。再描画が
-止まると「待機中」とし、処理中の待機やプレビューの一時停止も区別します。詳細に残る
-直近の計測値は、現在も描画が続いているという意味ではありません。平均フレーム間隔は
-GPU カーネル時間でも学習速度でもなく、数字を動かすだけの連続 GPU 再描画はしません。
+ビューポート画像だけを数え、キャッシュ画像のウィンドウ合成は数えません。非表示・最小化中、
+表示モデルがない場合やプレビュー一時停止中は連続更新しません。新しいフレームの待機と
+一時停止は区別します。詳細に残る直近の計測値は、現在も描画中という意味ではありません。
+平均フレーム間隔は GPU カーネル時間、ディスプレイのリフレッシュレート、学習速度とは異なります。
 
 点群・メッシュ・3DGS・2DGS に共通する表示機能です。この文書や静的確認は実際の
 Windows/OpenGL 検証を代替せず、表示の正しさは学習品質や実物の寸法精度を証明しません。

@@ -838,24 +838,28 @@ Terminology references: [CloudCompare official translations](https://github.com/
 | Show Frame Rate | 显示帧率 | フレームレートを表示 |
 | Mean frame interval | 平均帧间隔 | 平均フレーム間隔 |
 
-The viewport and main status use one presentation counter. During activity the
-readout is `125.00 FPS (8.00 ms)`. The HUD leaves room for navigation controls
+The viewport and main status use one presentation counter. Even with a
+stationary model, the live readout is formatted as `125.00 FPS (8.00 ms)`.
+The HUD leaves room for navigation controls
 only where they meet the status row. When the row cannot fit both numbers, it
 keeps the complete FPS; if even that does not fit, the details button remains
 available instead of showing a clipped number. The details retain the interval.
-The setting is on by default, saved per user, and hides the
-readout without affecting rendering or sampling. Preview pause remains visible.
+The setting is on by default and saved per user. Turning it off hides the
+readout and restores on-demand rendering. Hidden or minimized viewports and
+paused previews do not run the live refresh. Preview pause remains visible.
 Language changes refresh existing controls and details without resetting samples
 or modifying the scene, camera or worker. Milliseconds mean the average interval
 between presented frames, not GPU execution time, monitor Hz or training it/s.
 
-中文：视图中的「显示帧率」默认开启并记住选择，只控制显示。状态区仅在与导航控件
+中文：视图中的「显示帧率」默认开启并记住选择。静止时也按实际呈现测量，关闭后恢复按需绘制。
+隐藏、最小化或暂停预览时不持续刷帧。状态区仅在与导航控件
 同一高度时避让。窄视口优先保留完整 FPS；放不下时保留详情按钮，不显示截断数字。
 详情保留平均呈现帧间隔，它不是 GPU 执行时间、屏幕刷新率或训练速度。
 语言即时切换不重置样本、场景、相机或工作进程。
 
-日本語：「フレームレートを表示」は既定で有効で、表示だけを切り替えて設定を
-保存します。ステータス行とナビゲーション操作部が同じ高さにある場合のみ余白を確保
+日本語：「フレームレートを表示」は既定で有効で、設定を保存します。視点を動かさなくても
+実際に表示されたフレームを計測し、オフにすると必要なときだけ描画します。非表示・最小化中
+およびプレビューの一時停止中は連続更新しません。ステータス行とナビゲーション操作部が同じ高さにある場合のみ余白を確保
 します。狭いビューポートでは完全な FPS 表記を優先し、収まらない場合は数値を途中で
 切らず、詳細ボタンを残します。平均間隔は詳細に表示します。
 GPU 実行時間・ディスプレイのリフレッシュレート・学習速度とは異なります。
