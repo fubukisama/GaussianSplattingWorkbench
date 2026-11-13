@@ -1,6 +1,5 @@
 #include "ViewportStatusControlsSmokeTest.h"
 #include "AppLanguage.h"
-#include "AppTheme.h"
 #include "MainWindow.h"
 #include "NativeViewport.h"
 #include "SceneCoordinates.h"
@@ -30,6 +29,7 @@
 #include <QLayout>
 #include <QLineEdit>
 #include <QLocale>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPixmap>
@@ -264,12 +264,21 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
   auto *pause = window.findChild<QAction *>(QStringLiteral("pausePreviewAction"));
   auto *status = viewport.findChild<QLabel *>(QStringLiteral("viewportStatusLabel"));
   auto *details = viewport.findChild<QToolButton *>(QStringLiteral("viewportDetailsButton"));
+  auto *display = window.findChild<QMenu *>(QStringLiteral("displaySettingsMenu"));
+  auto *autoScale = window.findChild<QAction *>(QStringLiteral("autoUiScaleAction"));
   const auto key = QStringLiteral("view/showFrameRate");
-  if (!check(action && pause && status && details && window.screen() && window.layout() &&
+  if (!check(action && pause && status && details && display && autoScale &&
+      window.screen() && window.layout() &&
       action->isCheckable() && action->isChecked() &&
       status->testAttribute(Qt::WA_TransparentForMouseEvents),
       "visible-by-default frame rate action and non-intercepting status exist")) return false;
   const auto restore = qScopeGuard([&] { action->setChecked(true); });
+  const auto scaleAction = [&](int percent) -> QAction * {
+    for (auto *menu : display->findChildren<QMenu *>())
+      for (auto *item : menu->actions())
+        if (item->isCheckable() && item->data().toInt() == percent) return item;
+    return nullptr;
+  };
   const QRegularExpression full(QStringLiteral("^[0-9]+\\.[0-9]{2} FPS \\([0-9]+\\.[0-9]{2} ms\\)$"));
   const auto capture = [&](const QString &locale, const QString &name) {
     const QString directory = evidenceDirectory(output, locale, theme);
@@ -320,7 +329,9 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
           status->text().contains(narrow ? abbreviated : performance) &&
           viewport.rect().contains(status->geometry()) && viewport.rect().contains(details->geometry()) &&
           !status->geometry().intersects(details->geometry()) &&
-          (!narrow || (font.horizontalAdvance(abbreviated) <= status->width() &&
+          (!narrow || (qApp->property("gswUiScalePercent").toInt() == 150 &&
+                       status->font().pointSizeF() >= 14.0 &&
+                       font.horizontalAdvance(abbreviated) <= status->width() &&
                        status->width() < font.horizontalAdvance(performance) &&
                        !status->text().contains(QStringLiteral(" ms)")))),
           "wide status shows both values; a narrow status keeps FPS while details keep the interval")) return false;
@@ -333,16 +344,24 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
   };
   if (!exerciseLayout(false)) return false;
   const int originalScale = qApp->property("gswUiScalePercent").toInt();
+  const bool automatic = autoScale->isChecked();
+  auto *largeScale = scaleAction(150);
+  auto *previousScale = automatic ? autoScale : scaleAction(originalScale);
+  if (!check(largeScale && previousScale, "actual manual scale menu actions exist")) return false;
   const int originalMinimum = viewport.minimumWidth(), originalMaximum = viewport.maximumWidth();
-  AppTheme::apply(*qApp, 150, false);
-  dispatchFor(80);
+  largeScale->trigger();
+  if (!check(waitUntil([&] { return largeScale->isChecked() && !autoScale->isChecked() &&
+      qApp->property("gswUiScalePercent").toInt() == 150 &&
+      status->font().pointSizeF() >= 14.0; }),
+      "real manual 150 percent setting takes effect before constraining the viewport")) {
+    previousScale->trigger();
+    return false;
+  }
   // The test owns the viewport. Constrain its layout width explicitly:
   // resizeDocks() is only advisory and ignored by some Windows layouts.
   // Keep the ordinary paint/resize path, not a mocked status label.
-  const QString fpsOnly = QStringLiteral("888.88 FPS");
-  const int scale = qApp->property("gswUiScalePercent").toInt();
-  const int wanted = 2 * AppTheme::scaled(10, scale) + details->width() +
-      AppTheme::scaled(100, scale) + QFontMetrics(status->font()).horizontalAdvance(fpsOnly) + 4;
+  const int reserved = viewport.width() - status->width();
+  const int wanted = reserved + QFontMetrics(status->font()).horizontalAdvance(QStringLiteral("888.88 FPS")) + 8;
   viewport.setFixedWidth(wanted);
   window.layout()->activate();
   dispatchFor(80);
@@ -350,7 +369,7 @@ bool frameRatePresentationControls(MainWindow &window, NativeViewport &viewport,
       "test-owned viewport is genuinely narrow at 150 percent scale") && exerciseLayout(true);
   viewport.setMinimumWidth(originalMinimum);
   viewport.setMaximumWidth(originalMaximum);
-  AppTheme::apply(*qApp, originalScale, false);
+  previousScale->trigger();
   window.layout()->activate();
   dispatchFor(80);
   if (!narrowGood) return false;
