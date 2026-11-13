@@ -23,6 +23,13 @@ separate claims.
 
 ## 2026-11-13
 
+- **Fixed:** With **View → Show Frame Rate** on, loaded point-cloud, mesh,
+  3DGS and 2DGS views keep rendering and show measured FPS after input stops.
+  Turning it off restores on-demand rendering. The live refresh does not run
+  while the view is hidden, minimized or paused; training refresh limits are
+  retained. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/3f146c26bcbf7864bc02e0605789ee3d849d5239). Implemented; remote and package verification
+  are tracked separately.
+
 Status: **Implemented**; remote verification is recorded separately. No public
 Release or local installation is part of this change.
 
