@@ -12,6 +12,34 @@ fullAcceptance, a public release or production signing/channel authority.
 See the [three-language preview handoff](PREVIEW_E141_20261030.md) for exact
 source, archive digest, local readback and unfinished gates.
 
+## Signed automatic TLS diagnosis — 2026-11-13
+
+The [original failure](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/41045738943)
+is reproduced in the [source-bound diagnostic](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/43387777747/job/131760226143),
+attempt 1, commit `567495e00534836a9d1e9765cf3bfdc6100db198`.
+The real Controller's Helper loads app-local Schannel, receives only the leaf
+certificate and reports `QSslError::UnableToGetIssuerCertificate` before sending
+the archive GET. Signed metadata had already reached the verifier. The same
+Helper and installation context with the inherited SDK plugin path use external
+OpenSSL and prepare B; removing only that path reproduces the Schannel failure.
+These standalone probes leave the active pointer unchanged and do not replace
+the failing automatic verdict. The diagnostic artifact is `14019611479`
+(outer SHA-256 `824c5d36b1660f210c5bfc13396296e71370615ee46e0d03dac3995caecb9864`).
+
+The isolated HTTPS server now presents its ephemeral issuer with the leaf.
+The issuer is trusted only through the explicit fixture CA; presentation
+alone grants no trust. The production Helper, downloader, TLS/hostname
+verification, TUF/signature rules, and Windows certificate store are unchanged.
+The Schannel-specific download contract verifies both acceptance with the
+fixture CA and rejection without it. The real Controller must still activate
+B through the original background flow and prove both executable hashes,
+the same launcher, continued A-window identity and unchanged protected data.
+This is test-fixture repair, not an application version update or public rollout.
+See [Qt's pinned Schannel chain handling](https://github.com/qt/qtbase/blob/v6.8.3/src/plugins/tls/schannel/qtls_schannel.cpp#L2127-L2234).
+
+中文：修正隔离 HTTPS 夹具的证书链；生产校验、公开发布与本机安装均未改变。
+日本語：隔離 HTTPS フィクスチャの証明書チェーンを修正しました。本番の検証、公開、ローカルのインストールは変更していません。
+
 | Evidence | Exact source | Result | Scope |
 | --- | --- | --- | --- |
 | [e141 exact-source preview](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40840529308) / [Engine/2](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40840529279) | `e141f382cbedab53c8ea62e7ba9f8ea0e99c4094` | Native Windows all3jobs succeed, including175/175CTest; official disabled Engine/2, Security40840529288 and Installer40840529338 succeed. Provider-digest-bound App+Engine files are independently merged/read back:33660files,16092canonical source files. ZIP550800277B / SHA c28456b9a749abf6161b3fcd16aa7bc50f716aca99a6852b3e552ae3b8fab884 | preview files only; NOT_CONFIGURED, no local payload execution or existing installation/shortcut mutation |

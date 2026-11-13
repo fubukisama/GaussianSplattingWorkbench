@@ -8,10 +8,6 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Core Network Test)
 include(CTest)
 set(GSW_TRUST_LIBRARY "" CACHE FILEPATH "Exact independently built Rust static library")
 option(GSW_UPDATER_FIXTURE_BUILD "Build distinct test-only updater product" OFF)
-option(GSW_UPDATER_AUTOMATIC_TLS_DIAGNOSTIC "Temporary isolated TLS diagnostic" OFF)
-if(GSW_UPDATER_AUTOMATIC_TLS_DIAGNOSTIC AND NOT GSW_UPDATER_FIXTURE_BUILD)
-  message(FATAL_ERROR "The TLS diagnostic is for the distinct fixture build only")
-endif()
 add_library(gsw_startup_health STATIC ../src/NativeStartupHealth.cpp ../src/NativeStartupHealth.h)
 target_include_directories(gsw_startup_health PUBLIC ../src)
 target_link_libraries(gsw_startup_health PUBLIC Qt6::Core)
@@ -44,9 +40,6 @@ add_library(gsw_update_download STATIC
   ../src/NativeUpdateDownload.cpp ../src/NativeUpdateDownload.h)
 target_include_directories(gsw_update_download PUBLIC ../src)
 target_link_libraries(gsw_update_download PUBLIC Qt6::Core Qt6::Network)
-if(GSW_UPDATER_AUTOMATIC_TLS_DIAGNOSTIC)
-  target_compile_definitions(gsw_update_download PRIVATE GSW_UPDATER_AUTOMATIC_TLS_DIAGNOSTIC=1)
-endif()
 add_library(gsw_activation_core STATIC ../src/NativeActivationCore.cpp ../src/NativeActivationCore.h)
 add_library(gsw_miniz STATIC ../third_party/miniz/miniz.c)
 target_include_directories(gsw_miniz PUBLIC ../third_party/miniz)
@@ -127,10 +120,22 @@ if(BUILD_TESTING)
   if(MSVC)
     target_compile_options(gsw_update_download_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
   endif()
+  set(update_download_test_environment
+    "GSW_UPDATE_TEST_PYTHON=${Python3_EXECUTABLE};GSW_UPDATE_NETWORK_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/native_update_network_fixture.py;QT_FORCE_STDERR_LOGGING=1")
   add_test(NAME update_download_https COMMAND gsw_update_download_tests)
   set_tests_properties(update_download_https PROPERTIES TIMEOUT 60
-    ENVIRONMENT "GSW_UPDATE_TEST_PYTHON=${Python3_EXECUTABLE};GSW_UPDATE_NETWORK_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/native_update_network_fixture.py;QT_FORCE_STDERR_LOGGING=1"
+    ENVIRONMENT "${update_download_test_environment}"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  if(WIN32)
+    # Prove both acceptance of the complete, explicitly trusted fixture chain
+    # and refusal of the same server without that CA on the packaged backend.
+    add_test(NAME update_download_https_schannel COMMAND gsw_update_download_tests
+      downloadsRealHttpsBytesAndVerifiesExpectedLengthAndHash
+      rejectsAnUntrustedHttpsCertificateWithoutRetryOrPublication)
+    set_tests_properties(update_download_https_schannel PROPERTIES TIMEOUT 40
+      ENVIRONMENT "${update_download_test_environment};GSW_UPDATE_TEST_TLS_BACKEND=schannel"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   qt_add_executable(gsw_update_activation_tests ../tests/NativeUpdateActivationTests.cpp ../src/NativeDeveloperPublisher.cpp)
   target_compile_definitions(gsw_update_activation_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_include_directories(gsw_update_activation_tests PRIVATE ../third_party/nlohmann ../third_party/miniz)

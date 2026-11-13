@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QSslCertificate>
+#include <QSslSocket>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
@@ -53,6 +54,14 @@ class NativeUpdateDownloadTests final : public QObject {
 private slots:
   void initTestCase() {
     QVERIFY(temporary.isValid());
+#ifdef Q_OS_WIN
+    if (qEnvironmentVariable("GSW_UPDATE_TEST_TLS_BACKEND") == QLatin1String("schannel")) {
+      QVERIFY2(QSslSocket::setActiveBackend(QStringLiteral("schannel")),
+          "The explicit Windows TLS regression requires Schannel, not an SDK fallback.");
+      QCOMPARE(QSslSocket::activeBackend(), QStringLiteral("schannel"));
+      qInfo("Owned HTTPS regression backend: Schannel");
+    }
+#endif
     const QString python = qEnvironmentVariable("GSW_UPDATE_TEST_PYTHON");
     QVERIFY2(!python.isEmpty(), "Remote update test Python must be explicitly selected.");
     const QString script = qEnvironmentVariable("GSW_UPDATE_NETWORK_FIXTURE",

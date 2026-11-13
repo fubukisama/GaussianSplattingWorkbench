@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-import hashlib
 import importlib.util
 import json
 import os
@@ -26,16 +25,6 @@ PRODUCT = "Fubukisama.GaussianSceneWorkbench.UpdateFixture"
 ORIGINAL_HELPER = "GSW Update Fixture Helper.exe"
 UI_HELPER_ALIAS = "Gaussian Scene Workbench Update Helper.exe"
 REPO = Path(__file__).absolute().parent.parent
-
-
-def tls_diagnostic_rows(raw):
-    pattern = re.compile(
-        rb"\[DEBUG-auto-tls-2\] (?:certificate-error=-?\d{1,4}|"
-        rb"(?:encrypted|ssl-errors|network-error) backend=(?:schannel|openssl|cert-only|other) "
-        rb"plugin=(?:app-local|external|unknown) network=-?\d{1,4} protocol=-?\d{1,4} "
-        rb"ca=\d{1,6} peerChain=\d{1,4} "
-        rb"reason=(?:required-context-attributes|algorithm-mismatch|unclassified))")
-    return [row.decode("ascii") for row in raw[:65536].splitlines() if pattern.fullmatch(row)][:16]
 
 
 def load_script(name):
@@ -162,7 +151,8 @@ def prepare(args):
             "serverInfo": str(ready), "profile": str(issued / "profile.json"),
             "fixture": str(issued / "fixture.json"), "controlFile": fixture["controlFile"],
             "sourceCommit": args.source_commit, "sourceTree": args.source_tree,
-            "fixtureAExecutableSha256": PREPARE.digest(a / "bin/Gaussian Scene Workbench.exe")}
+            "fixtureAExecutableSha256": PREPARE.digest(a / "bin/Gaussian Scene Workbench.exe"),
+            "fixtureBExecutableSha256": PREPARE.digest(b / "bin/Gaussian Scene Workbench.exe")}
         PREPARE.write_json(root / "preparation.json", report)
         return report
     except BaseException:
@@ -173,93 +163,6 @@ def prepare(args):
 
 
 class AutomaticFlow(unittest.TestCase):
-    def diagnose_failed_prepare(self, root, native_helper, alias):
-        """[DEBUG-auto-tls-1] Secondary evidence only; never changes the verdict.
-
-        All commands remain real public --prepare operations. They can update
-        the test's own download/prepared intent, but cannot activate a slot.
-        Do not retain raw stderr, URLs, environment values or IPC capabilities.
-        """
-        def optional_digest(path):
-            return PREPARE.digest(path) if path.is_file() else None
-
-        environment = {}
-        for key in ("PATH", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH",
-                    "QT_SSL_BACKEND", "SSL_CERT_FILE", "SSL_CERT_DIR", "OPENSSL_CONF", "QT_LOGGING_RULES"):
-            value = os.environ.get(key, "").encode("utf-8")
-            environment[key] = {"present": key in os.environ, "bytes": len(value),
-                "sha256": hashlib.sha256(value).hexdigest()}
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel.GetDllDirectoryW.argtypes = [ctypes.c_ulong, ctypes.c_wchar_p]
-        kernel.GetDllDirectoryW.restype = ctypes.c_ulong
-        directory = ctypes.create_unicode_buffer(32768)
-        length = kernel.GetDllDirectoryW(len(directory), directory)
-        inventory = {}
-        for label, base in (("bootstrap", root / "bin"),
-                            ("automaticA", root / "versions/fixture-a/bin")):
-            files = [path for path in sorted(base.rglob("*")) if path.is_file()
-                and (path.suffix.lower() == ".dll" or path.name.lower() == "qt.conf")]
-            inventory[label] = [{"path": path.relative_to(base).as_posix(),
-                "size": path.stat().st_size, "sha256": PREPARE.digest(path)} for path in files[:512]]
-            if len(files) > 512:
-                inventory[label].append({"inventoryTruncated": True})
-        record = {"schema": "gsw.automatic_failure_diagnostic/1",
-            "diagnosticTag": "DEBUG-auto-tls-1", "diagnosticOnly": True,
-            "testOnly": True, "production": False, "formalGswAcceptance": False,
-            "primaryContractOutcome": "FAIL", "primaryVerdictReplaced": False,
-            "preparedIntentMayBeWrittenByProbes": True,
-            "parentContext": {"currentDirectory": str(Path.cwd()),
-                "windowsDllDirectory": directory.value if length < len(directory) else None,
-                "environmentFingerprints": environment},
-            "ownedRuntimeFiles": inventory, "probes": [],
-            "currentSha256BeforeProbes": optional_digest(root / "current.json")}
-        # Same executable, working directory, server, trust and offer. Only
-        # remove the developer SDK plugin path in the second probe. Do not
-        # feed either probe's result back into the real automatic UI verdict.
-        without_sdk = os.environ.copy()
-        without_sdk.pop("QT_PLUGIN_PATH", None)
-        for name, executable, cwd, env in (
-                ("alias-inherited-sdk", alias, root, None),
-                ("alias-without-sdk-plugin-path", alias, root, without_sdk)):
-            probe = {"name": name, "operation": "--prepare", "channel": "stable",
-                "helperSha256": PREPARE.digest(executable), "cwd": str(cwd),
-                "currentSha256Before": optional_digest(root / "current.json")}
-            started = time.monotonic()
-            try:
-                result = subprocess.run([str(executable), "--prepare", "stable"],
-                    stdin=subprocess.DEVNULL, capture_output=True, timeout=15, cwd=cwd, env=env,
-                    creationflags=subprocess.CREATE_NO_WINDOW)
-                probe.update(exitCode=result.returncode, timedOut=False,
-                    stdoutBytes=len(result.stdout), stderrBytes=len(result.stderr),
-                    stderrSha256=hashlib.sha256(result.stderr).hexdigest())
-                probe["tls"] = tls_diagnostic_rows(result.stderr)
-                events = []
-                if len(result.stdout) <= 4 * 1024 * 1024:
-                    for line in result.stdout.splitlines():
-                        if not line.strip():
-                            continue
-                        event = json.loads(line)
-                        if not isinstance(event, dict) or event.get("schema") != "gsw.update_event/1":
-                            raise ValueError("unexpected_diagnostic_event")
-                        # Only public bounded machine fields, never raw URLs,
-                        # arbitrary release notes, stderr text or certificates.
-                        events.append({key: event[key] for key in
-                            ("phase", "code", "buildId", "receivedBytes", "totalBytes") if key in event})
-                else:
-                    raise ValueError("diagnostic_stdout_too_large")
-                probe["events"] = events
-            except subprocess.TimeoutExpired:
-                probe.update(timedOut=True, diagnosticError="probe_deadline")
-            except Exception as error:
-                probe["diagnosticError"] = type(error).__name__
-            probe["elapsedMs"] = round((time.monotonic() - started) * 1000)
-            probe["currentSha256After"] = optional_digest(root / "current.json")
-            record["probes"].append(probe)
-        record["currentSha256AfterProbes"] = optional_digest(root / "current.json")
-        record["currentUnchangedByProbes"] = (record["currentSha256BeforeProbes"] ==
-            record["currentSha256AfterProbes"])
-        E2E.write_json(ARGS.evidence / "automatic-failure-diagnostic.json", record)
-
     @staticmethod
     def read_marker(path):
         # QSaveFile must be free to replace this advisory marker while it is
@@ -314,6 +217,10 @@ class AutomaticFlow(unittest.TestCase):
         shutil.copyfile(ARGS.helper, native_helper)
         shutil.copyfile(ARGS.helper, alias)
         PREPARE.deploy(ARGS.windeployqt, native_helper, root / "bin")
+        self.assertTrue((root / "bin/tls/qschannelbackend.dll").is_file(),
+            "automatic fixture must include the Windows TLS backend")
+        self.assertFalse((root / "bin/tls/qopensslbackend.dll").exists(),
+            "automatic fixture must not mask the Windows backend with a different app-local TLS plugin")
         self.assertEqual(PREPARE.digest(alias), PREPARE.digest(native_helper))
         bootstrap = {"schema": "gsw.native_bootstrap/1", "protocol": 2,
             "product": PRODUCT, "platform": "windows-x64",
@@ -343,13 +250,14 @@ class AutomaticFlow(unittest.TestCase):
             "fixtureProfileSha256": fixture["profileSha256"],
             "nativeHelperSha256": PREPARE.digest(native_helper),
             "uiHelperAliasSha256": PREPARE.digest(alias),
+            "appLocalSchannelPluginSha256": PREPARE.digest(root / "bin/tls/qschannelbackend.dll"),
             "sourceCommit": prepared["sourceCommit"], "sourceTree": prepared["sourceTree"]})
         checked = helper.helper_request("automatic-fixture-check-A", "--check", "stable")
         self.assertEqual(checked[-1]["code"], "VERIFIED")
         helper.helper_request("automatic-install-A", "--install", "stable")
-        helper.active("fixture-a")
-        self.assertEqual(PREPARE.digest(root / "versions/fixture-a/bin/Gaussian Scene Workbench.exe"),
-            prepared["fixtureAExecutableSha256"])
+        pointer_a = helper.active("fixture-a")
+        exe_a_sha256 = PREPARE.digest(root / "versions/fixture-a/bin/Gaussian Scene Workbench.exe")
+        self.assertEqual(exe_a_sha256, prepared["fixtureAExecutableSha256"])
         protected = {name: E2E.tree_hashes(root / name)
                      for name in ("bin", "user-data", "versions/fixture-a")}
         bootstrap_bytes = (root / "bootstrap.json").read_bytes()
@@ -368,12 +276,12 @@ class AutomaticFlow(unittest.TestCase):
             env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW)
         a_process = None
-        primary_passed = False
         try:
             self.assertEqual(launcher.wait(timeout=15), 0)
             armed = self.wait_marker(marker, "armed", 15)
             self.assertIs(armed["automaticCheck"], True)
             self.assertIs(armed["prepareForNextLaunch"], True)
+            self.assertRegex(armed["applicationWindow"], "^[1-9a-f][0-9a-f]*$")
             a_process = E2E.ProcessDiagnostic(armed["pid"])
             before = a_process.snapshot()
             self.assertIs(before.get("opened"), True)
@@ -383,7 +291,11 @@ class AutomaticFlow(unittest.TestCase):
             activated = self.wait_marker(marker, "activated", 75)
             self.assertIs(activated["foregroundUnchanged"], True)
             self.assertEqual(activated["foregroundWindow"], armed["foregroundWindow"])
+            self.assertEqual(activated["applicationWindow"], armed["applicationWindow"])
+            self.assertEqual(activated["pid"], armed["pid"])
             pointer_b = helper.active("fixture-b")
+            exe_b_sha256 = PREPARE.digest(root / "versions/fixture-b/bin/Gaussian Scene Workbench.exe")
+            self.assertEqual(exe_b_sha256, prepared["fixtureBExecutableSha256"])
             # The real current/slot verification plus an actual B process are
             # acceptance. The widget marker alone cannot grant an installation.
             b = helper.launch("B")
@@ -391,6 +303,7 @@ class AutomaticFlow(unittest.TestCase):
             after = a_process.snapshot()
             self.assertIs(after["signalled"], False)
             self.assertEqual(after["processCreationTime"], before["processCreationTime"])
+            self.assertEqual(after["image"], before["image"])
             self.assertEqual(helper.active("fixture-b"), pointer_b)
             for name, hashes in protected.items():
                 self.assertEqual(E2E.tree_hashes(root / name), hashes, name)
@@ -414,13 +327,19 @@ class AutomaticFlow(unittest.TestCase):
                 "nativeHelperSha256": PREPARE.digest(native_helper),
                 "privateUiHelperAliasSameBytes": True, "originalFixtureHelperNameRetained": True,
                 "uiFixtureRootOverrideCompiled": False, "productScheduleChanged": False,
+                "inheritedSdkPluginPathRemoved": "QT_PLUGIN_PATH" not in environment,
                 "armed": armed, "activated": activated, "oldWindowBirth": before["processCreationTime"],
                 "actualNextLaunchBuild": b["buildId"], "actualNextLaunchPid": b["pid"],
+                "releaseA": {"buildId": "fixture-a", "executableSha256": exe_a_sha256,
+                             "archiveSha256": fixture["archives"]["A"]["archiveSha256"],
+                             "activePointer": json.loads(pointer_a)},
+                "releaseB": {"buildId": "fixture-b", "executableSha256": exe_b_sha256,
+                             "archiveSha256": fixture["archives"]["B"]["archiveSha256"],
+                             "activePointer": json.loads(pointer_b)},
                 "oldAStayedAlive": True, "bootstrapUnchanged": True, "userDataUnchanged": True,
                 "originalSlotUnchanged": True, "sourceCommit": prepared["sourceCommit"],
                 "sourceTree": prepared["sourceTree"], "optimizerResume3DGS": "NOT_RUN",
                 "optimizerResume2DGS": "NOT_RUN", "steps": helper.steps})
-            primary_passed = True
         finally:
             if launcher.poll() is None:
                 launcher.kill()
@@ -434,13 +353,6 @@ class AutomaticFlow(unittest.TestCase):
             try:
                 if marker.is_file():
                     E2E.write_json(ARGS.evidence / "automatic-A-observation.json", self.read_marker(marker))
-                tls_trace = root / "fixture-evidence/automatic-tls-observation.log"
-                if tls_trace.is_file():
-                    with tls_trace.open("rb") as stream:
-                        E2E.write_json(ARGS.evidence / "automatic-tls-observation.json", {
-                            "diagnosticTag": "DEBUG-auto-tls-2", "diagnosticOnly": True,
-                            "scope": "actual-controller-helper-before-standalone-probes",
-                            "rows": tls_diagnostic_rows(stream.read(65536))})
                 # Server logs deliberately exclude queries, credentials and
                 # capabilities. Retain only this bounded test's network rows.
                 with request_log.open("rb") as stream:
@@ -450,16 +362,6 @@ class AutomaticFlow(unittest.TestCase):
                     (ARGS.evidence / "automatic-https-requests.jsonl").write_bytes(wire)
             except Exception:
                 pass  # Diagnostics must not replace a primary failure verdict.
-            if not primary_passed:
-                try:
-                    self.diagnose_failed_prepare(root, native_helper, alias)
-                except Exception as error:
-                    try:
-                        E2E.write_json(ARGS.evidence / "automatic-diagnostic-error.json", {
-                            "diagnosticTag": "DEBUG-auto-tls-1", "diagnosticOnly": True,
-                            "primaryVerdictReplaced": False, "errorType": type(error).__name__})
-                    except Exception:
-                        pass
 
 
 def main():

@@ -2,11 +2,6 @@ name: Native Auto Update
 
 on:
   workflow_dispatch:
-    inputs:
-      isolated_tls_diagnostic:
-        description: Run only the private signed automatic UI TLS diagnostic (not acceptance)
-        type: boolean
-        default: false
   push:
     branches: [main]
     paths:
@@ -62,7 +57,6 @@ env:
 
 jobs:
   isolated-profile-configuration:
-    if: ${{ !inputs.isolated_tls_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 25
     env:
@@ -160,7 +154,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-source-closure:
-    if: ${{ !inputs.isolated_tls_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 30
     env:
@@ -204,7 +197,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-developer-core:
-    if: ${{ !inputs.isolated_tls_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 10
     env:
@@ -271,7 +263,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-update-ui:
-    if: ${{ !inputs.isolated_tls_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -324,7 +315,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   release-policy-contracts:
-    if: ${{ !inputs.isolated_tls_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 5
     steps:
@@ -350,7 +340,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-contracts:
-    if: ${{ !inputs.isolated_tls_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 15
     steps:
@@ -441,7 +430,6 @@ jobs:
           retention-days: 14
 
   isolated-trust:
-    if: ${{ !inputs.isolated_tls_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 30
     env:
@@ -526,7 +514,6 @@ jobs:
           retention-days: 14
 
   isolated-stable-entry:
-    if: ${{ !inputs.isolated_tls_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 35
     env:
@@ -768,8 +755,7 @@ jobs:
           rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release `
             --no-default-features --features fixture-cli --target-dir D:/gu/au
           if($LASTEXITCODE -ne 0){throw 'Automatic-flow fixture trust build failed.'}
-          cmake -S native/updater -B native/build-automatic-entry -DGSW_TRUST_LIBRARY=D:/gu/au/release/gsw_updater_trust.lib `
-            -DGSW_UPDATER_AUTOMATIC_TLS_DIAGNOSTIC=${{ inputs.isolated_tls_diagnostic && 'ON' || 'OFF' }}
+          cmake -S native/updater -B native/build-automatic-entry -DGSW_TRUST_LIBRARY=D:/gu/au/release/gsw_updater_trust.lib
           if($LASTEXITCODE -ne 0){throw 'Automatic-flow actual helper configure failed.'}
           cmake --build native/build-automatic-entry --config Release --parallel --target gsw_native_update_helper
           if($LASTEXITCODE -ne 0){throw 'Automatic-flow actual helper build failed.'}
@@ -789,7 +775,6 @@ jobs:
           New-Item -ItemType Directory -Path native/update-automatic-evidence -Force | Out-Null
           [ordered]@{schema='gsw.updater_isolated_evidence/1';scope='production-ui-signed-fixture-only';
             production=false;formalGswAcceptance=false;sourceCommit=(git rev-parse HEAD).Trim();
-            diagnosticOnly=('${{ inputs.isolated_tls_diagnostic }}' -eq 'true');
             sourceTree=(git rev-parse 'HEAD^{tree}').Trim();runId=$env:GITHUB_RUN_ID;
             runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/update-automatic-evidence/source.json
           if(Test-Path native/.update-automatic/preparation.json){
@@ -809,7 +794,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-first-bootstrap:
-    if: ${{ !inputs.isolated_tls_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 10
     env:

@@ -6,7 +6,6 @@
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
-#include <QCryptographicHash>
 #include <QDialog>
 #include <QDateTime>
 #include <QDir>
@@ -14,10 +13,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
-#include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
-#include <QLibraryInfo>
 #include <QMainWindow>
 #include <QMenuBar>
 #include <QPointer>
@@ -84,29 +81,8 @@ int main(int argc, char **argv) {
   bool armed = false, activated = false, foregroundUnchanged = true;
   QString failure, lastText;
   quintptr foreground = 0;
+  const auto windowHandle = window.winId();
   qint64 armedAt = -1, activatedAt = -1;
-  // [DEBUG-auto-tls-1] Read-only inherited/loader context. No SSL backend is
-  // loaded here and no process environment, certificate or search path changes.
-  QJsonObject environmentFingerprints;
-  for (const auto *key : {"PATH", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH",
-          "QT_SSL_BACKEND", "SSL_CERT_FILE", "SSL_CERT_DIR", "OPENSSL_CONF", "QT_LOGGING_RULES"}) {
-    const auto value = qgetenv(key);
-    environmentFingerprints.insert(QLatin1String(key), QJsonObject{
-      {"present", qEnvironmentVariableIsSet(key)}, {"bytes", double(value.size())},
-      {"sha256", QString::fromLatin1(QCryptographicHash::hash(value, QCryptographicHash::Sha256).toHex())}});
-  }
-  QString dllDirectory;
-#ifdef Q_OS_WIN
-  wchar_t dllPath[32768]{};
-  const auto dllLength = GetDllDirectoryW(32768, dllPath);
-  if (dllLength < 32768) dllDirectory = QString::fromWCharArray(dllPath, int(dllLength));
-#endif
-  const QJsonObject runtimeContext{{"diagnosticTag", "DEBUG-auto-tls-1"},
-    {"qtVersion", QString::fromLatin1(qVersion())}, {"currentDirectory", QDir::currentPath()},
-    {"applicationDirectory", QCoreApplication::applicationDirPath()},
-    {"qtLibraryPaths", QJsonArray::fromStringList(QCoreApplication::libraryPaths())},
-    {"qtCompiledPluginPath", QLibraryInfo::path(QLibraryInfo::PluginsPath)},
-    {"windowsDllDirectory", dllDirectory}, {"environmentFingerprints", environmentFingerprints}};
   auto state = [&](const char *phase) {
     return QJsonObject{{"phase", QLatin1String(phase)}, {"label", "A"},
       {"buildId", "fixture-a"}, {"executable", app.applicationFilePath()},
@@ -116,7 +92,7 @@ int main(int argc, char **argv) {
       {"foregroundWindow", QString::number(quint64(foreground), 16)},
       {"automaticCheck", QSettings().value("updates/automaticCheck", true).toBool()},
       {"prepareForNextLaunch", QSettings().value("updates/prepareForNextLaunch", false).toBool()},
-      {"runtimeContext", runtimeContext},
+      {"applicationWindow", QString::number(quint64(windowHandle), 16)},
       {"failure", failure}};
   };
   auto fail = [&](const char *code) {
@@ -171,6 +147,9 @@ int main(int argc, char **argv) {
 #endif
     if (!foregroundUnchanged) { fail("background_flow_changed_foreground"); return; }
     if (!dialog || dialog->isVisible() || !status) { fail("background_flow_opened_dialog"); return; }
+    if (!window.isVisible() || window.winId() != windowHandle) {
+      fail("old_application_window_changed"); return;
+    }
     lastText = status->text();
     if (lastText.contains(QLatin1String("(download_tls_failed)"))) {
       fail("automatic_download_tls_failed"); return;

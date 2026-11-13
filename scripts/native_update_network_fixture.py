@@ -46,8 +46,13 @@ def certificates(root: Path) -> tuple[Path, Path, Path]:
             .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
             .sign(ca_key, hashes.SHA256()))
     ca_path, cert_path, key_path = root / "fixture-ca.pem", root / "fixture-server.pem", root / "fixture-server.key"
-    ca_path.write_bytes(ca.public_bytes(serialization.Encoding.PEM))
-    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    issuer_pem = ca.public_bytes(serialization.Encoding.PEM)
+    ca_path.write_bytes(issuer_pem)
+    # Supply the ephemeral issuer to Windows' chain builder as well as the
+    # leaf. It is still trusted only through the client's explicit fixture CA;
+    # the server sending a root does not make it a trust anchor. Never install
+    # it in Windows or use it in a production profile.
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM) + issuer_pem)
     key_path.write_bytes(key.private_bytes(serialization.Encoding.PEM,
                                          serialization.PrivateFormat.PKCS8,
                                          serialization.NoEncryption()))
