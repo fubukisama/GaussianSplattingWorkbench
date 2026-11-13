@@ -331,9 +331,10 @@ struct ChildObjectSecurity {
 };
 Json runClient(const std::wstring &bootstrap, const std::wstring &destination, const std::wstring &base,
     bool loaderProbe = false, bool requestPrivateDesktop = true, HANDLE fixedDiagnosticToken = nullptr,
-    bool childObjectUserControl = false) {
+    bool childObjectUserControl = false, bool detachedConsole = false) {
   need(!fixedDiagnosticToken || loaderProbe, "BOOTSTRAP_LOADER_CONTROL_INVALID");
   need(!childObjectUserControl || (loaderProbe && fixedDiagnosticToken), "BOOTSTRAP_LOADER_CONTROL_INVALID");
+  need(!detachedConsole || (loaderProbe && fixedDiagnosticToken), "BOOTSTRAP_LOADER_CONTROL_INVALID");
   stage("root_acl");
   mediumOwnedDirectory(base);
   stage("restrict_client_token");
@@ -386,7 +387,8 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
   need(CreateProcessAsUserW(clientToken, bootstrap.c_str(), arguments.data(),
       childObjectUserControl ? &childSecurity.attributes : nullptr,
       childObjectUserControl ? &childSecurity.attributes : nullptr, TRUE,
-      CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
+      CREATE_SUSPENDED | (detachedConsole ? DETACHED_PROCESS : CREATE_NO_WINDOW) |
+        CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
       environment.data(), base.c_str(), &start.StartupInfo, &information) != FALSE, "BOOTSTRAP_CLIENT_CREATE_FAILED");
   diagnostic.childCreated = true;
   diagnostic.childProcessId = information.dwProcessId;
@@ -453,6 +455,7 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
     return {{"scope", "diagnostic-control-not-installation-acceptance"}, {"enteredMain", entered},
         {"childExitCode", exit}, {"capturedOutputBytes", captured.size()}, {"terminalToken", facts},
         {"childProcessId", information.dwProcessId}, {"privateDesktopRequested", requestPrivateDesktop},
+        {"detachedConsole", detachedConsole},
         {"accessProbeDesktopScope", "owned-private-desktop-not-os-selected-null-desktop"},
         {"childObjectUserControl", childObjectUserControl}, {"tokenDefaultDaclChanged", false},
         {"securityAttributesVariant", childObjectUserControl ? "copied-default-dacl-plus-user-ga" : "token-default"},
@@ -460,6 +463,8 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
         {"parentSecurityChanged", false}, {"systemPolicyChanged", false},
         {"restrictedAccess", diagnostic.access}, {"restrictedObjects", diagnostic.objects}};
   }
+  stage("child_response_presence");
+  need(!captured.empty(), "BOOTSTRAP_CLIENT_NO_RESPONSE");
   stage("parse_child_response");
   const auto response = Json::parse(captured);
   if (response.is_object() && response.contains("code") && response["code"].is_string()) {
@@ -541,7 +546,7 @@ int wmain(int argc, wchar_t **argv) {
   }
   result["labDiagnostic"] = diagnostic.record(diagnosticOsError);
   // Never turn these controls into a passing FIRST result or an installer
-  // fallback. Both controls retain the exact ordinary-client token assertions.
+  // fallback. All controls retain the exact ordinary-client token assertions.
   if (result["ok"] == false && diagnostic.childExited && diagnostic.childExitCode == 0xC0000142 && !probe.empty()) {
     Json controls{{"scope", "diagnostic-only"}, {"installationAcceptance", false}, {"cases", Json::array()}};
     try {
@@ -550,25 +555,29 @@ int wmain(int argc, wchar_t **argv) {
       auto approved = approvedImage(probe);
       need(approved.sha256 == pin, "BOOTSTRAP_SOURCE_IDENTITY_MISMATCH");
       controls["probeSha256"] = approved.sha256;
-      // All marker controls share this exact token object. The new third case
-      // differs from case 1 only in the child process/thread object descriptor.
+      // All marker controls share this exact token object. The fourth varies
+      // only how the console-subsystem marker is launched.
       auto fixedToken = restrictedClientToken();
       controls["samePrimaryTokenForControls"] = true;
-      for (const auto &[privateDesktopRequested, childObjectUserControl] :
-          {std::pair{true, false}, std::pair{false, false}, std::pair{true, true}}) {
+      struct Control { bool privateDesktopRequested, childObjectUserControl, detachedConsole; };
+      for (const auto &[privateDesktopRequested, childObjectUserControl, detachedConsole] :
+          {Control{true, false, false}, Control{false, false, false},
+           Control{true, true, false}, Control{true, false, true}}) {
         diagnostic = LabDiagnostic{};
         try {
           controls["cases"].push_back(runClient(probe, destinationForProbe, baseForProbe,
-              true, privateDesktopRequested, fixedToken.value, childObjectUserControl));
+              true, privateDesktopRequested, fixedToken.value, childObjectUserControl, detachedConsole));
         } catch (const Failure &error) {
           controls["cases"].push_back({{"scope", "diagnostic-control-not-installation-acceptance"},
               {"privateDesktopRequested", privateDesktopRequested}, {"childObjectUserControl", childObjectUserControl},
+              {"detachedConsole", detachedConsole},
               {"securityAttributesVariant", childObjectUserControl ? "copied-default-dacl-plus-user-ga" : "token-default"},
               {"code", error.code}, {"osError", error.systemCode},
               {"stage", diagnostic.stage}});
         } catch (...) {
           controls["cases"].push_back({{"scope", "diagnostic-control-not-installation-acceptance"},
               {"privateDesktopRequested", privateDesktopRequested}, {"childObjectUserControl", childObjectUserControl},
+              {"detachedConsole", detachedConsole},
               {"securityAttributesVariant", childObjectUserControl ? "copied-default-dacl-plus-user-ga" : "token-default"},
               {"code", "BOOTSTRAP_LOADER_CONTROL_FAILED"}, {"stage", diagnostic.stage}});
         }
