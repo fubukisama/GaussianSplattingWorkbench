@@ -37,8 +37,33 @@ the same launcher, continued A-window identity and unchanged protected data.
 This is test-fixture repair, not an application version update or public rollout.
 See [Qt's pinned Schannel chain handling](https://github.com/qt/qtbase/blob/v6.8.3/src/plugins/tls/schannel/qtls_schannel.cpp#L2127-L2234).
 
+On the exact repair `5375f0154d34502cab367cff845bc1efe322c651`,
+tree `1e9ff04170bfee05a1ab6f7b13a17eef2c14f553`, the [real automatic flow](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/43390113088/job/131767723609)
+passed in run `43390113088` attempt 1. The Controller used the owned packaged
+runtime without the SDK plugin path, downloaded signed B over real HTTPS,
+prepared and activated it; the same stable entry opened B while A retained
+its original window/process and foreground state. Bootstrap, A slot, project
+and paused-state sentinel bytes were unchanged. Evidence artifact `14020995479`
+(outer SHA-256 `9ad3028e0c0f1df0556830386522afdf66d20fdb912a2cfa967a043a322bebbb`)
+records A EXE SHA-256 `da889ec2df93531ffcaa8f8bcf300a7c9d7c82fa9d01374da5b0e24500ee67e5`
+and B EXE SHA-256 `30a60319f35fc5a7ea833b7856cde3bbbb199e4e4ee2863323989726f42dd1e4`.
+This verifies the isolated Qt fixture, not GPU training, first installation,
+interrupted preparation recovery, or a formal GSW package.
+
+The [separate HTTPS component job](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/43390113088/job/131767723684)
+remains **FAIL** (3/4 CTests). Its default TLS suite and explicit Schannel
+untrusted-certificate refusal passed, but the Schannel positive payload case
+reported `download_network_error`, not the original issuer error. The reason
+for this distinct result is not established; do not drop the case or infer
+that the positive contract passed. Artifact `14020343484` retains the logs and
+JUnit result. The [restricted first-bootstrap job](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/43390113088/job/131767723626)
+also remains **FAIL**: `0xC0000142` before main, no child JSON. These gates
+prevent full isolated acceptance even with the automatic lifecycle row green.
+
 中文：修正隔离 HTTPS 夹具的证书链；生产校验、公开发布与本机安装均未改变。
+远端真实 A→B 已通过；Schannel 独立下载正例与首次引导仍未通过，不能交付正式版本。
 日本語：隔離 HTTPS フィクスチャの証明書チェーンを修正しました。本番の検証、公開、ローカルのインストールは変更していません。
+リモートの A→B は成功しましたが、Schannel の単独ダウンロード正例と初回起動は未合格です。
 
 | Evidence | Exact source | Result | Scope |
 | --- | --- | --- | --- |
@@ -82,8 +107,8 @@ launcher/helper, but its scope is explicitly not the formal GSW renderer or
 claim is inferred from a lifecycle or UI test.
 
 Applicable isolated gaps remain separate from public authorization: authenticated
-first-install/bootstrap migration, automatic TLS/prepare/apply and interrupted
-prepared-state restart recovery, concurrent capacity loss, permanently hung-helper
+first-install/bootstrap migration, the separate Schannel payload positive case,
+interrupted prepared-state restart recovery, concurrent capacity loss, permanently hung-helper
 close and remaining full matrices. Real contention/termination, bounded resource
 cases, Qt/CPU continuity and the test-root recovery chooser have scoped GREEN
 evidence; they do not establish formal GSW/GPU optimizer acceptance. The completed
