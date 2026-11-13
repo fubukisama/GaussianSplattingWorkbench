@@ -21,6 +21,23 @@ in the same change, with affected capabilities, limitations and verification or
 delivery status. Implementation, verification, publication and installation remain
 separate claims.
 
+## 2026-11-13
+
+Status: **Implemented**; remote verification is recorded separately. No public
+Release or local installation is part of this change.
+
+- **Improved:** the native viewport directly uses SIBR Core's 60-interval
+  counter and shows live FPS and the mean presented-frame interval, for example
+  `125.00 FPS (8.00 ms)`. Narrow views prioritize FPS; details retain the interval.
+  Point, mesh, 3DGS and 2DGS previews share the same measurement. The interval
+  is not GPU execution time, monitor refresh rate, or training speed.
+- **Added:** **View → Show Frame Rate** is enabled by default, remembers the
+  setting and changes only the display. Idle, waiting and preview-pause states
+  remain truthful without starting a continuous render loop.
+- **Compatibility:** no renderer, training, project format or updater changes.
+  The pinned Apache-2.0 SIBR source and notices accompany corresponding source
+  and binaries. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/050672c6884ccf74502bb9266546be2b501fa9cf).
+
 ## 2026-10-30
 
 Status: **Implemented**; this section is a source record, not a release or installation receipt.
