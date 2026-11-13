@@ -172,6 +172,9 @@ int main(int argc, char **argv) {
     if (!foregroundUnchanged) { fail("background_flow_changed_foreground"); return; }
     if (!dialog || dialog->isVisible() || !status) { fail("background_flow_opened_dialog"); return; }
     lastText = status->text();
+    if (lastText.contains(QLatin1String("(download_tls_failed)"))) {
+      fail("automatic_download_tls_failed"); return;
+    }
     const auto completed = QCoreApplication::translate("Workbench",
         "下次启动时生效；当前窗口和任务将继续运行。");
     if (!activated && lastText == completed) {

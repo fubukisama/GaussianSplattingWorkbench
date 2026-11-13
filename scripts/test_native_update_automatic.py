@@ -28,6 +28,16 @@ UI_HELPER_ALIAS = "Gaussian Scene Workbench Update Helper.exe"
 REPO = Path(__file__).absolute().parent.parent
 
 
+def tls_diagnostic_rows(raw):
+    pattern = re.compile(
+        rb"\[DEBUG-auto-tls-2\] (?:certificate-error=-?\d{1,4}|"
+        rb"(?:encrypted|ssl-errors|network-error) backend=(?:schannel|openssl|cert-only|other) "
+        rb"plugin=(?:app-local|external|unknown) network=-?\d{1,4} protocol=-?\d{1,4} "
+        rb"ca=\d{1,6} peerChain=\d{1,4} "
+        rb"reason=(?:required-context-attributes|algorithm-mismatch|unclassified))")
+    return [row.decode("ascii") for row in raw[:65536].splitlines() if pattern.fullmatch(row)][:16]
+
+
 def load_script(name):
     spec = importlib.util.spec_from_file_location("gsw_automatic_" + name,
         REPO / "scripts" / (name + ".py"))
@@ -203,22 +213,26 @@ class AutomaticFlow(unittest.TestCase):
                 "environmentFingerprints": environment},
             "ownedRuntimeFiles": inventory, "probes": [],
             "currentSha256BeforeProbes": optional_digest(root / "current.json")}
-        for name, executable, cwd in (
-                ("original-parent-cwd", native_helper, Path.cwd()),
-                ("alias-parent-cwd", alias, Path.cwd()),
-                ("original-root-cwd", native_helper, root),
-                ("alias-root-cwd", alias, root)):
+        # Same executable, working directory, server, trust and offer. Only
+        # remove the developer SDK plugin path in the second probe. Do not
+        # feed either probe's result back into the real automatic UI verdict.
+        without_sdk = os.environ.copy()
+        without_sdk.pop("QT_PLUGIN_PATH", None)
+        for name, executable, cwd, env in (
+                ("alias-inherited-sdk", alias, root, None),
+                ("alias-without-sdk-plugin-path", alias, root, without_sdk)):
             probe = {"name": name, "operation": "--prepare", "channel": "stable",
                 "helperSha256": PREPARE.digest(executable), "cwd": str(cwd),
                 "currentSha256Before": optional_digest(root / "current.json")}
             started = time.monotonic()
             try:
                 result = subprocess.run([str(executable), "--prepare", "stable"],
-                    stdin=subprocess.DEVNULL, capture_output=True, timeout=40, cwd=cwd,
+                    stdin=subprocess.DEVNULL, capture_output=True, timeout=15, cwd=cwd, env=env,
                     creationflags=subprocess.CREATE_NO_WINDOW)
                 probe.update(exitCode=result.returncode, timedOut=False,
                     stdoutBytes=len(result.stdout), stderrBytes=len(result.stderr),
                     stderrSha256=hashlib.sha256(result.stderr).hexdigest())
+                probe["tls"] = tls_diagnostic_rows(result.stderr)
                 events = []
                 if len(result.stdout) <= 4 * 1024 * 1024:
                     for line in result.stdout.splitlines():
@@ -420,6 +434,13 @@ class AutomaticFlow(unittest.TestCase):
             try:
                 if marker.is_file():
                     E2E.write_json(ARGS.evidence / "automatic-A-observation.json", self.read_marker(marker))
+                tls_trace = root / "fixture-evidence/automatic-tls-observation.log"
+                if tls_trace.is_file():
+                    with tls_trace.open("rb") as stream:
+                        E2E.write_json(ARGS.evidence / "automatic-tls-observation.json", {
+                            "diagnosticTag": "DEBUG-auto-tls-2", "diagnosticOnly": True,
+                            "scope": "actual-controller-helper-before-standalone-probes",
+                            "rows": tls_diagnostic_rows(stream.read(65536))})
                 # Server logs deliberately exclude queries, credentials and
                 # capabilities. Retain only this bounded test's network rows.
                 with request_log.open("rb") as stream:

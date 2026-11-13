@@ -22,6 +22,11 @@
 #include <QStorageInfo>
 #include <QTimer>
 
+#ifdef GSW_UPDATER_AUTOMATIC_TLS_DIAGNOSTIC
+#include <QCoreApplication>
+#include <cstdio>
+#endif
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <fcntl.h>
@@ -118,6 +123,55 @@ QString networkCode(QNetworkReply::NetworkError error) {
   default: return QStringLiteral("download_network_error");
   }
 }
+
+#ifdef GSW_UPDATER_AUTOMATIC_TLS_DIAGNOSTIC
+// Remote fixture only. Record a fixed classification, not the Qt error text,
+// request URL, certificate contents, process environment, or credentials.
+void traceAutomaticTls(const char *stage, const QNetworkReply *reply,
+    const QList<QSslError> &errors = {}) {
+  if (qEnvironmentVariable("GITHUB_ACTIONS") != QLatin1String("true")) return;
+  const auto backend = QSslSocket::activeBackend();
+  const char *backendName = backend == QLatin1String("schannel") ? "schannel" :
+      backend == QLatin1String("openssl") ? "openssl" :
+      backend == QLatin1String("cert-only") ? "cert-only" : "other";
+  const auto config = reply->sslConfiguration();
+  const auto detail = reply->errorString();
+  const char *reason = detail.contains(QLatin1String("required attributes for the connection")) ?
+      "required-context-attributes" : detail.contains(QLatin1String("Algorithm mismatch")) ?
+      "algorithm-mismatch" : "unclassified";
+  const char *origin = "unknown";
+#ifdef Q_OS_WIN
+  const wchar_t *plugin = backend == QLatin1String("schannel") ? L"qschannelbackend.dll" :
+      backend == QLatin1String("openssl") ? L"qopensslbackend.dll" : nullptr;
+  wchar_t modulePath[32768]{};
+  const auto module = plugin ? GetModuleHandleW(plugin) : nullptr;
+  const DWORD length = module ? GetModuleFileNameW(module, modulePath, 32768) : 0;
+  if (length > 0 && length < 32768) {
+    const auto path = QDir::fromNativeSeparators(QString::fromWCharArray(modulePath, int(length)));
+    origin = path.startsWith(QCoreApplication::applicationDirPath() + QLatin1Char('/'),
+        Qt::CaseInsensitive) ? "app-local" : "external";
+  }
+#endif
+  char line[512]{};
+  std::snprintf(line, sizeof(line), "[DEBUG-auto-tls-2] %s backend=%s plugin=%s "
+      "network=%d protocol=%d ca=%lld peerChain=%lld reason=%s\n", stage, backendName, origin, int(reply->error()),
+      int(config.sessionProtocol()), static_cast<long long>(config.caCertificates().size()),
+      static_cast<long long>(config.peerCertificateChain().size()), reason);
+  QByteArray trace(line);
+  for (qsizetype i = 0; i < qMin<qsizetype>(errors.size(), 8); ++i)
+    trace += "[DEBUG-auto-tls-2] certificate-error=" + QByteArray::number(int(errors.at(i).error())) + '\n';
+  std::fwrite(trace.constData(), 1, size_t(trace.size()), stderr);
+  std::fflush(stderr);
+  // The Controller intentionally discards child stderr. Only an owned remote
+  // fixture A creates this directory; no caller-selected path is accepted.
+  const auto directory = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(
+      QStringLiteral("../fixture-evidence"));
+  const auto path = QDir(QDir::cleanPath(directory)).filePath(QStringLiteral("automatic-tls-observation.log"));
+  if (!QFileInfo(directory).isDir() || !ordinaryLocalPath(path) || QFileInfo(path).size() >= 65536) return;
+  QFile file(path);
+  if (file.open(QIODevice::WriteOnly | QIODevice::Append)) file.write(trace);
+}
+#endif
 
 bool strongEtag(const QByteArray &tag) {
   if (tag.size() < 2 || tag.size() > 1024 || tag.front() != '"' || tag.back() != '"') return false;
@@ -378,9 +432,20 @@ public:
     QObject::connect(current, &QNetworkReply::readyRead, q, [this, current, serial] {
       if (active && reply == current && responseSerial == serial) consume();
     });
-    QObject::connect(current, &QNetworkReply::sslErrors, q, [this, current, serial](const QList<QSslError> &) {
-      if (active && reply == current && responseSerial == serial) finish(QStringLiteral("download_tls_failed"));
+    QObject::connect(current, &QNetworkReply::sslErrors, q, [this, current, serial](const QList<QSslError> &errors) {
+      if (!active || reply != current || responseSerial != serial) return;
+#ifdef GSW_UPDATER_AUTOMATIC_TLS_DIAGNOSTIC
+      traceAutomaticTls("ssl-errors", current, errors);
+#else
+      Q_UNUSED(errors);
+#endif
+      finish(QStringLiteral("download_tls_failed"));
     });
+#ifdef GSW_UPDATER_AUTOMATIC_TLS_DIAGNOSTIC
+    QObject::connect(current, &QNetworkReply::encrypted, q, [this, current, serial] {
+      if (active && reply == current && responseSerial == serial) traceAutomaticTls("encrypted", current);
+    });
+#endif
     QObject::connect(current, &QNetworkReply::finished, q, [this, current, serial] {
       if (active && reply == current && responseSerial == serial) received();
     });
@@ -526,7 +591,12 @@ public:
     if (reply->error() == QNetworkReply::RemoteHostClosedError) {
       retryLater(networkCode(reply->error())); return;
     }
-    if (reply->error() != QNetworkReply::NoError) { finish(networkCode(reply->error())); return; }
+    if (reply->error() != QNetworkReply::NoError) {
+#ifdef GSW_UPDATER_AUTOMATIC_TLS_DIAGNOSTIC
+      traceAutomaticTls("network-error", reply);
+#endif
+      finish(networkCode(reply->error())); return;
+    }
     if (!headersAccepted || bytes != request.expectedLength || !part.flush() || part.size() != bytes) {
       finish(QStringLiteral("download_length_mismatch")); return;
     }
