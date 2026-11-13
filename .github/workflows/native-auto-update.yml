@@ -2,11 +2,6 @@ name: Native Auto Update
 
 on:
   workflow_dispatch:
-    inputs:
-      transport_bootstrap_diagnostic:
-        description: Temporarily run the two isolated diagnostic jobs; not release acceptance
-        type: boolean
-        default: false
   push:
     branches: [main]
     paths:
@@ -62,7 +57,6 @@ env:
 
 jobs:
   isolated-profile-configuration:
-    if: ${{ !inputs.transport_bootstrap_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 25
     env:
@@ -160,7 +154,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-source-closure:
-    if: ${{ !inputs.transport_bootstrap_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 30
     env:
@@ -204,7 +197,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-developer-core:
-    if: ${{ !inputs.transport_bootstrap_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 10
     env:
@@ -271,7 +263,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-update-ui:
-    if: ${{ !inputs.transport_bootstrap_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -324,7 +315,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   release-policy-contracts:
-    if: ${{ !inputs.transport_bootstrap_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 5
     steps:
@@ -380,8 +370,7 @@ jobs:
         shell: pwsh
         run: |
           cmake -S native/updater -B native/build-auto-update -G 'Visual Studio 17 2022' -A x64 `
-            -DBUILD_TESTING=ON -DGSW_ACTIVATION_FAULT_TESTS=ON "-DPython3_EXECUTABLE=$PWD/native/.qa-updater/Scripts/python.exe" `
-            -DGSW_UPDATER_DOWNLOAD_DIAGNOSTIC=${{ inputs.transport_bootstrap_diagnostic && 'ON' || 'OFF' }}
+            -DBUILD_TESTING=ON -DGSW_ACTIVATION_FAULT_TESTS=ON "-DPython3_EXECUTABLE=$PWD/native/.qa-updater/Scripts/python.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Updater configure failed.' }
           cmake --build native/build-auto-update --config Release --parallel --target gsw_update_download_tests gsw_update_activation_tests gsw_update_path_tests gsw_activation_fault_fixture
           if ($LASTEXITCODE -ne 0) { throw 'Updater build failed.' }
@@ -441,7 +430,6 @@ jobs:
           retention-days: 14
 
   isolated-trust:
-    if: ${{ !inputs.transport_bootstrap_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 30
     env:
@@ -526,7 +514,6 @@ jobs:
           retention-days: 14
 
   isolated-stable-entry:
-    if: ${{ !inputs.transport_bootstrap_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 35
     env:
@@ -691,7 +678,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
   isolated-signed-automatic-ui:
-    if: ${{ !inputs.transport_bootstrap_diagnostic }}
     runs-on: windows-2022
     timeout-minutes: 35
     env:

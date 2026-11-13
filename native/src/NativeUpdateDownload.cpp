@@ -22,10 +22,6 @@
 #include <QStorageInfo>
 #include <QTimer>
 
-#ifdef GSW_UPDATER_DOWNLOAD_DIAGNOSTIC
-#include <QElapsedTimer>
-#endif
-
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <fcntl.h>
@@ -150,16 +146,6 @@ public:
   qint64 bytes = 0, requestOffset = 0;
   quint64 generation = 0, responseSerial = 0;
   int httpStatus = 0, redirects = 0, attempts = 1;
-#ifdef GSW_UPDATER_DOWNLOAD_DIAGNOSTIC
-  QElapsedTimer diagnosticClock;
-  void traceDownload(const char *stage, int error = 0) const {
-    if (qEnvironmentVariable("GITHUB_ACTIONS") != QLatin1String("true") ||
-        qEnvironmentVariable("GSW_UPDATE_TEST_TLS_BACKEND") != QLatin1String("schannel")) return;
-    qInfo("[DEBUG-download-stall] stage=%s error=%d elapsedMs=%lld status=%d bytes=%lld attempt=%d idleMs=%d",
-        stage, error, static_cast<long long>(diagnosticClock.elapsed()), httpStatus,
-        static_cast<long long>(bytes), attempts, policy.inactivityTimeoutMs);
-  }
-#endif
 
   explicit Impl(NativeUpdateDownload *owner) : q(owner), manager(owner), deadline(owner) {
     deadline.setSingleShot(true);
@@ -386,15 +372,6 @@ public:
     reply->setReadBufferSize(64 * 1024);
     auto *current = reply.data();
     const auto serial = ++responseSerial;
-#ifdef GSW_UPDATER_DOWNLOAD_DIAGNOSTIC
-    diagnosticClock.start();
-    QObject::connect(current, &QNetworkReply::encrypted, q, [this, current, serial] {
-      if (active && reply == current && responseSerial == serial) traceDownload("encrypted");
-    });
-    QObject::connect(current, &QNetworkReply::errorOccurred, q, [this, current, serial](auto error) {
-      if (active && reply == current && responseSerial == serial) traceDownload("network-error", int(error));
-    });
-#endif
     QObject::connect(current, &QNetworkReply::metaDataChanged, q, [this, current, serial] {
       if (active && reply == current && responseSerial == serial) acceptHeaders();
     });
@@ -546,9 +523,6 @@ public:
     if (!alive) return;
     if (token != generation || serial != responseSerial) return;
     if (!active || !reply) return;
-#ifdef GSW_UPDATER_DOWNLOAD_DIAGNOSTIC
-    traceDownload("finished", int(reply->error()));
-#endif
     if (reply->error() == QNetworkReply::RemoteHostClosedError) {
       retryLater(networkCode(reply->error())); return;
     }

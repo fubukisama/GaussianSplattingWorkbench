@@ -387,7 +387,10 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
   need(CreateProcessAsUserW(clientToken, bootstrap.c_str(), arguments.data(),
       childObjectUserControl ? &childSecurity.attributes : nullptr,
       childObjectUserControl ? &childSecurity.attributes : nullptr, TRUE,
-      CREATE_SUSPENDED | (detachedConsole ? DETACHED_PROCESS : CREATE_NO_WINDOW) |
+      // CREATE_NO_WINDOW still initializes a hidden console host, which
+      // failed before main under this exact restricted token. Detach the
+      // real endpoint; only the marker controls retain the comparison flag.
+      CREATE_SUSPENDED | (!loaderProbe || detachedConsole ? DETACHED_PROCESS : CREATE_NO_WINDOW) |
         CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
       environment.data(), base.c_str(), &start.StartupInfo, &information) != FALSE, "BOOTSTRAP_CLIENT_CREATE_FAILED");
   diagnostic.childCreated = true;

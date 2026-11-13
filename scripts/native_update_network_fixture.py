@@ -63,6 +63,25 @@ def certificates(root: Path) -> tuple[Path, Path, Path]:
     return ca_path, cert_path, key_path
 
 
+class OwnedHttpsServer(ThreadingHTTPServer):
+    def shutdown_request(self, request):
+        # socketserver's TCP shutdown does not send TLS close_notify. With
+        # Schannel and a bounded receive buffer, closing that way can discard
+        # queued records from an otherwise complete HTTP response. Keep the
+        # intentionally interrupted endpoints abrupt: they close their socket
+        # in the handler before this ordinary shutdown path runs.
+        if isinstance(request, ssl.SSLSocket) and request.fileno() >= 0:
+            try:
+                request.settimeout(1.0)
+                request.unwrap().close()
+                return
+            except OSError:
+                # Refused certificates, intentional disconnects and a client
+                # which already closed must not hang the owned server thread.
+                pass
+        super().shutdown_request(request)
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -259,7 +278,7 @@ def main() -> None:
     payload = bytes(range(256)) * (4096 * args.payload_mib)
     payload_path = args.root / "payload.bin"
     payload_path.write_bytes(payload)
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = OwnedHttpsServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
     server.guard = threading.Lock()
     server.counts = {}

@@ -84,19 +84,6 @@ private slots:
   void downloadsRealHttpsBytesAndVerifiesExpectedLengthAndHash() {
     auto r = request(QStringLiteral("/payload"), QStringLiteral("verified.bin"));
     const auto result = download(r, policy());
-#ifdef GSW_UPDATER_DOWNLOAD_DIAGNOSTIC
-    if (!result.ok && qEnvironmentVariable("GITHUB_ACTIONS") == QLatin1String("true") &&
-        QSslSocket::activeBackend() == QLatin1String("schannel")) {
-      auto control = policy();
-      control.inactivityTimeoutMs = 6000; // Diagnostic only; original verdict stays RED.
-      auto comparison = r;
-      comparison.destinationPath = temporary.filePath("diagnostic-timeout-control.bin");
-      const auto longer = download(comparison, control);
-      qInfo("[DEBUG-download-stall] controlOk=%d status=%d bytes=%lld correctPayload=%d",
-          longer.ok, longer.httpStatus, static_cast<long long>(longer.receivedBytes),
-          longer.ok && read(comparison.destinationPath) == read(fixture.value("payloadPath").toString()));
-    }
-#endif
     QVERIFY2(result.ok, qPrintable(result.code));
     QVERIFY(!result.cancelled);
     QCOMPARE(result.receivedBytes, r.expectedLength);
