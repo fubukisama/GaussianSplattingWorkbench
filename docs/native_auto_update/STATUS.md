@@ -65,6 +65,47 @@ prevent full isolated acceptance even with the automatic lifecycle row green.
 日本語：隔離 HTTPS フィクスチャの証明書チェーンを修正しました。本番の検証、公開、ローカルのインストールは変更していません。
 リモートの A→B は成功しましたが、Schannel の単独ダウンロード正例と初回起動は未合格です。
 
+### Schannel payload and restricted bootstrap follow-up
+
+[Diagnostic run 43392860614](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/43392860614)
+at `e881372e427c89b69a657bce466429f0284b3740` observed encryption and valid
+HTTP 200/206 headers before Schannel received `RemoteHostClosedError` on a
+partial payload. The original attempts closed in 52–94 ms, not at the
+1,500 ms idle timeout; a longer diagnostic bound did not remove the close.
+The fixture now sends a bounded orderly TLS shutdown for normal responses,
+while the intentional interruption endpoints still close abruptly.
+[Native contracts at 9d60f1c](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/43393720684/job/131779513106),
+attempt 1, passed all four CTests, including full Schannel bytes/length/hash,
+strong-validator resume and refusal of an untrusted issuer. Artifact
+`14021708902` has outer SHA-256
+`a40d01afd19f27f80208a77ae8a4e0c5ae33f7e4507d81c8a73fed793d05b12d`.
+The production downloader, timeout/retry bounds, trust and signature rules
+are unchanged; this repairs the remote HTTPS fixture, not a public release.
+The [actual automatic A→B flow](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/43393720684/job/131779513213)
+also passed at the same commit and attempt. Artifact `14021134481`
+(outer SHA-256 `2204a128ff2eedfd14be11f980dc1bbf037b8eba6ceed60d30ffeba0ebc1b826`)
+records the same stable entry starting B, A remaining alive and unchanged
+bootstrap/user data. The observed executable SHA-256 values are
+`1deb63ea719548e4449c96a2b371cc1d327af0f5e6b1cd6ac0e7483ea0d42b59` (A) and
+`9a34ce0581256185046754bc57800ec41285cb123b5e8881b24d5520fcf5fe94` (B).
+
+The same restricted token and private desktop in the diagnostic reproduced
+`0xC0000142` with `CREATE_NO_WINDOW`, but reached the marker with
+`DETACHED_PROCESS`. On [the actual bootstrap endpoint](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/43393720684/job/131779513228)
+at `9d60f1c58ad257c57db8ab96ff6ce8a504931475`, the detached process reached
+main and returned `BOOTSTRAP_NOT_IMPLEMENTED` (exit 2), with the original
+restricted medium-integrity identity, no administrator or developer tooling,
+and no target mutation. The `BOOTSTRAP_COMMITTED` assertion remains **FAIL**;
+this is now a missing install implementation, not a pre-main loader failure.
+Artifact `14021818124` has outer SHA-256
+`fde60eac1e961342dfa9334cf21789153a712191fc42ea7c05b4f1d62252f83d`.
+No first installation, migration, production signing, or local delivery is
+inferred. See [Windows process creation flags](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags)
+and [Python TLS shutdown](https://docs.python.org/3.12/library/ssl.html#ssl.SSLSocket.unwrap).
+
+中文：Schannel 完整下载、断流续传和拒绝未受信证书已通过。受限首装端点已能启动，但安装仍未实现。
+日本語：Schannel の完全なダウンロード、切断後の再開、未信頼証明書の拒否は合格。制限付き初回導入は起動できましたが、インストールは未実装です。
+
 | Evidence | Exact source | Result | Scope |
 | --- | --- | --- | --- |
 | [e141 exact-source preview](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40840529308) / [Engine/2](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40840529279) | `e141f382cbedab53c8ea62e7ba9f8ea0e99c4094` | Native Windows all3jobs succeed, including175/175CTest; official disabled Engine/2, Security40840529288 and Installer40840529338 succeed. Provider-digest-bound App+Engine files are independently merged/read back:33660files,16092canonical source files. ZIP550800277B / SHA c28456b9a749abf6161b3fcd16aa7bc50f716aca99a6852b3e552ae3b8fab884 | preview files only; NOT_CONFIGURED, no local payload execution or existing installation/shortcut mutation |
@@ -107,7 +148,7 @@ launcher/helper, but its scope is explicitly not the formal GSW renderer or
 claim is inferred from a lifecycle or UI test.
 
 Applicable isolated gaps remain separate from public authorization: authenticated
-first-install/bootstrap migration, the separate Schannel payload positive case,
+first-install implementation/bootstrap migration,
 interrupted prepared-state restart recovery, concurrent capacity loss, permanently hung-helper
 close and remaining full matrices. Real contention/termination, bounded resource
 cases, Qt/CPU continuity and the test-root recovery chooser have scoped GREEN
