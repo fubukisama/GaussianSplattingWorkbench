@@ -31,7 +31,8 @@ int wmain(int argc, wchar_t **argv) {
     if (installed.helperDownloadTrace) {
       result["helperDownloadTrace"] = {{"qtError", installed.helperQtNetworkError},
         {"httpStatus", installed.helperHttpStatus}, {"bytes", installed.helperReceivedBytes},
-        {"sslSupported", installed.helperSslSupported}, {"tlsBackend", installed.helperTlsBackend}};
+        {"sslSupported", installed.helperSslSupported}, {"tlsBackend", installed.helperTlsBackend},
+        {"sspiStatus", installed.helperSspiStatus}, {"contextCreation", installed.helperContextCreation}};
     }
     result["buildId"] = installed.buildId;
     result["executableSha256"] = installed.executableSha256;

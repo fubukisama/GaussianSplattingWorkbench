@@ -360,6 +360,7 @@ int main(int argc, char **argv) {
             QStringLiteral("cert-only"), QStringLiteral("securetransport")}.contains(backend);
         const QJsonObject trace{{"qtError", downloaded.networkError}, {"httpStatus", downloaded.httpStatus},
             {"bytes", double(downloaded.receivedBytes)}, {"sslSupported", QSslSocket::supportsSsl()},
+            {"sspiStatus", double(downloaded.fixtureSspiStatus)}, {"contextCreation", downloaded.fixtureContextCreation},
             {"tlsBackend", knownBackend ? backend : QStringLiteral("other")}};
         // Only fixed, numeric or enumerated values from the isolated fixture.
         event(QStringLiteral("failed"), downloaded.code, {{"fixtureDownloadTrace", trace}});

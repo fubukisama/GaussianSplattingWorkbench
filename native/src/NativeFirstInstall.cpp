@@ -557,6 +557,9 @@ Result install(const std::wstring &destination) {
           result.helperReceivedBytes = received;
           result.helperSslSupported = trace["sslSupported"].get<bool>();
           result.helperTlsBackend = backend;
+          const auto sspi = trace.value("sspiStatus", std::uint64_t(0));
+          if (sspi <= 0xffffffff) result.helperSspiStatus = static_cast<unsigned long>(sspi);
+          result.helperContextCreation = trace.value("contextCreation", false);
         }
       }
 #endif

@@ -125,6 +125,30 @@ bool strongEtag(const QByteArray &tag) {
     if (uchar(tag[i]) < 0x21 || uchar(tag[i]) > 0x7e || tag[i] == '"') return false;
   return true;
 }
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+// Qt 6.8 maps several Schannel socket errors to UnknownNetworkError. Decode
+// only the fixed formats from Qt's Schannel implementation; never serialize
+// errorString(), arbitrary digits, hostnames, certificate names or URLs.
+quint32 fixtureSchannelStatus(QString detail, bool &contextCreation) {
+  constexpr QLatin1StringView contextPrefix("Error creating SSL context (");
+  contextCreation = detail.startsWith(contextPrefix) && detail.endsWith(QLatin1Char(')'));
+  if (contextCreation) detail = detail.mid(contextPrefix.size(), detail.size() - contextPrefix.size() - 1);
+  if (detail == QLatin1String("No credentials")) return 0x8009030e;
+  if (detail == QLatin1String("Internal error")) return 0x80090304;
+  if (detail == QLatin1String("Access denied")) return 0x8009030c;
+  if (detail == QLatin1String("No cipher suites in common")) return 0x80090331;
+  if (detail == QLatin1String("The credentials were not recognized / Invalid argument")) return 0x8009030d;
+  constexpr QLatin1StringView numericPrefix("Unknown error occurred: ");
+  if (!detail.startsWith(numericPrefix)) return 0;
+  const auto value = QStringView(detail).sliced(numericPrefix.size());
+  const auto digits = value.startsWith(QLatin1Char('-')) ? value.sliced(1) : value;
+  if (digits.isEmpty() || digits.size() > 10) return 0;
+  for (const auto digit : digits) if (digit < QLatin1Char('0') || digit > QLatin1Char('9')) return 0;
+  bool valid = false;
+  const auto number = value.toLongLong(&valid);
+  return valid && number >= -2147483648LL && number <= 4294967295LL ? quint32(number) : 0;
+}
+#endif
 } // namespace
 
 class NativeUpdateDownload::Impl {
@@ -198,6 +222,14 @@ public:
     finishing = true;
     deadline.stop();
     const int networkError = reply ? int(reply->error()) : 0;
+    quint32 fixtureSspiStatus = 0;
+    bool fixtureContextCreation = false;
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+    if (networkError == QNetworkReply::UnknownNetworkError && reply &&
+        QSslSocket::activeBackend() == QLatin1String("schannel")) {
+      fixtureSspiStatus = fixtureSchannelStatus(reply->errorString(), fixtureContextCreation);
+    }
+#endif
     if (reply) { QObject::disconnect(reply, nullptr, q, nullptr); reply->abort(); reply->deleteLater(); reply = nullptr; }
     part.close();
     if (output) { output->cancelWriting(); output.reset(); }
@@ -216,6 +248,8 @@ public:
     result.filePath = ok ? request.destinationPath : QString();
     result.receivedBytes = bytes; result.httpStatus = httpStatus; result.resumed = resumed;
     result.networkError = networkError;
+    result.fixtureSspiStatus = fixtureSspiStatus;
+    result.fixtureContextCreation = fixtureContextCreation;
     const QPointer<NativeUpdateDownload> alive(q);
     if (!transition(ok ? State::Completed : cancelled ? State::Cancelled : State::Failed) || !alive) return;
     active = false; finishing = false;

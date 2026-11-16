@@ -13,6 +13,8 @@ struct Result {
   bool helperDownloadTrace = false, helperSslSupported = false;
   unsigned int helperQtNetworkError = 0, helperHttpStatus = 0;
   std::uint64_t helperReceivedBytes = 0;
+  unsigned long helperSspiStatus = 0;
+  bool helperContextCreation = false;
   std::string helperTlsBackend;
 #endif
 };
