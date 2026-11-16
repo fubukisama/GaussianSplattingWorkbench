@@ -125,6 +125,12 @@ class Handler(BaseHTTPRequestHandler):
                 digest = hashlib.file_digest(stream, "sha256").hexdigest()
             tag = '"sha256-' + digest + '"'
             mode = control.get("networkMode", "normal") if control.get("faultPath") == path else "normal"
+            if mode == "redirect-unapproved":
+                self.send_response(302)
+                self.send_header("Location", "https://example.invalid/forbidden-archive")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             match = re.fullmatch(r"bytes=(\d+)-", raw_range)
             start = int(match[1]) if match else 0
             partial = bool(match) and mode != "range-ignored" and (

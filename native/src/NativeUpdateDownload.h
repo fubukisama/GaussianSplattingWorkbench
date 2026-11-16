@@ -40,9 +40,6 @@ struct NativeUpdateDownloadResult final {
   qint64 receivedBytes = 0;
   int httpStatus = 0;
   bool resumed = false;
-  int networkError = 0; // Numeric Qt classification only, not a URL or error string.
-  quint32 fixtureSspiStatus = 0; // An allowlisted numeric diagnostic, fixture builds only.
-  bool fixtureContextCreation = false;
 };
 
 class NativeUpdateDownload final : public QObject {

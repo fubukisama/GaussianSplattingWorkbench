@@ -26,10 +26,11 @@ impl Request {
     pub fn parse(bytes: &[u8]) -> Result<Self> {
         let value = strict_json(bytes, 16 * 1024).map_err(|_| "INVALID_REQUEST")?;
         let request: Self = serde_json::from_value(value).map_err(|_| "INVALID_REQUEST")?;
-        if request.schema != 1 || !matches!(request.operation.as_str(), "resolve" | "verify_cached" | "inspect_accepted")
+        if request.schema != 1 || !matches!(request.operation.as_str(), "resolve" | "verify_cached" | "inspect_accepted" | "fetch_initial_archive")
             || !matches!(request.channel.as_str(), "stable" | "preview") || request.installation_root.len() > 1024
             || request.expected_build_id.as_deref().is_some_and(|v| !safe_token(v))
-            || (request.operation == "verify_cached" && request.expected_build_id.is_none()) {
+            || (matches!(request.operation.as_str(), "verify_cached" | "fetch_initial_archive") && request.expected_build_id.is_none())
+            || (request.operation == "fetch_initial_archive" && request.channel != "stable") {
             return Err("INVALID_REQUEST");
         }
         Ok(request)

@@ -22,7 +22,7 @@ NativeTrustResult NativeUpdateTrustBridge::request(const QString &operation, con
     result.code = QStringLiteral("activation_lock_required"); return result;
   }
   if (!QStringList{QStringLiteral("resolve"), QStringLiteral("verify_cached"),
-      QStringLiteral("inspect_accepted")}.contains(operation) ||
+      QStringLiteral("inspect_accepted"), QStringLiteral("fetch_initial_archive")}.contains(operation) ||
       !QStringList{QStringLiteral("stable"), QStringLiteral("preview")}.contains(channel)) return result;
   QJsonObject request{{"schema", 1}, {"operation", operation},
       {"installation_root", lock.installationRoot()}, {"channel", channel}};

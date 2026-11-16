@@ -11,13 +11,21 @@ native update Helper and their deployed runtime files. No Git, Python, GitHub
 account, external trust arguments or elevation are needed by the carrier.
 
 The carrier verifies and copies the kit into a private sibling directory, runs
-the same native Helper for `--install stable`, and reads back the resulting
+the same native Helper for `--install-initial stable`, and reads back the resulting
 active pointer, executable digest and online trust receipt. Only then does it
 rename the complete root into place. It does not overwrite an existing root,
 create shortcuts, launch the app or migrate a protocol-1 installation. A hard
 interruption may leave its owned staging directory, not a visible half-install
 at the requested destination. Open the installed `bin/Gaussian Scene Workbench Launcher.exe`
 only when you want to start the app.
+
+Initial archives are streamed through the existing signed-metadata HTTPS
+client. This uses server and hostname verification under the same process
+identity without depending on Schannel's implicit outbound credentials. It
+revalidates cached signed metadata before using the offered archive URL, limits
+redirects to approved HTTPS hosts, and verifies the exact signed length and
+SHA-256 before publishing the archive. The Helper revalidates metadata and
+activation checks again; existing installations retain their normal update path.
 
 ## 简体中文
 
@@ -32,6 +40,11 @@ only when you want to start the app.
 一次移到目标位置。不覆盖已有目录，不创建快捷方式，不启动软件，不迁移协议 1 的旧安装。
 进程被强制中断时可能残留专用临时目录，目标位置不会出现半成品。需要启动时再打开安装
 目录下的 `bin/Gaussian Scene Workbench Launcher.exe`。
+
+首装下载复用现有签名元数据的 HTTPS 客户端，保持服务器证书和主机名校验，不依赖
+Schannel 隐式外发凭据，也不改变进程权限。下载前重新核验签名元数据，只允许批准的
+HTTPS 跳转，核对签名声明的包长和 SHA-256 后才发布安装包；激活前会再次核验。
+已有安装的普通更新流程不变。
 
 ## 日本語
 
@@ -48,6 +61,12 @@ only when you want to start the app.
 既存の導入先は上書きせず、ショートカット作成、アプリ起動、プロトコル 1 の移行は行いません。
 強制終了で一時ディレクトリーが残っても、指定パスに未完了のインストールは表示されません。
 起動するときは導入先の `bin/Gaussian Scene Workbench Launcher.exe` を開きます。
+
+初回のアーカイブ取得には署名付きメタデータ用の HTTPS クライアントを使用します。
+サーバー証明書とホスト名を検証し、Schannel の暗黙的な送信資格情報や権限の変更は
+不要です。取得前に署名付きメタデータを再確認し、承認済みの HTTPS リダイレクトだけを
+許可します。署名済みのサイズと SHA-256 を確認してからアーカイブを確定し、有効化前に
+再検証します。既存版の通常更新経路は変更しません。
 
 ## Build and acceptance / 构建与验收 / ビルドと受入
 
@@ -68,7 +87,8 @@ The remote `isolated-first-bootstrap` job uses its own test trust and Qt package
 It checks the restricted medium-integrity client, then independently verifies
 every bootstrap and version file, the online receipt, and an actual Qt fixture
 window launched through the installed stable entry. It checks occupied-root,
-changed-manifest and corrupted-download refusals. This is not Authenticode or
+changed-manifest, wrong-signature, unapproved-redirect and corrupted-download
+refusals. This is not Authenticode or
 public release acceptance, a physical clean OS test, or evidence of protocol-1
 migration. No production pin, signing key or public feed is provided here.
 

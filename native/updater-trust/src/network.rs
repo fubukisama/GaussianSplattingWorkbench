@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use crate::policy::{validate_metadata, Profile, Result, DESCRIPTOR_LIMIT, METADATA_LIMIT};
+use crate::policy::{validate_metadata, Offer, Profile, Result, DESCRIPTOR_LIMIT, METADATA_LIMIT};
 use async_trait::async_trait;
+use aws_lc_rs::digest::{Context, SHA256};
 use bytes::Bytes;
 use futures::stream;
 #[cfg(not(feature = "fixture-profile"))]
@@ -8,6 +9,8 @@ use rustls_platform_verifier::BuilderVerifierExt;
 use std::collections::BTreeMap;
 use std::ffi::{c_int, c_void};
 use std::future::Future;
+use std::io::Write;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tough::{Transport, TransportError, TransportErrorKind, TransportStream};
@@ -39,6 +42,101 @@ impl Cancellation {
     }
 }
 
+fn https_client(_profile: &Profile, idle: Duration, total: Duration) -> Result<reqwest::Client> {
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let builder = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions().map_err(|_| "TLS_CONFIGURATION_FAILED")?;
+    #[cfg(feature = "fixture-profile")]
+    let config = {
+        let mut roots = rustls::RootCertStore::empty();
+        let certificates = pem::parse_many(_profile.fixture_ca_pem.as_deref().ok_or("PROFILE_INVALID")?)
+            .map_err(|_| "PROFILE_INVALID")?;
+        if certificates.is_empty() || certificates.len() > 8 { return Err("PROFILE_INVALID"); }
+        for certificate in certificates {
+            if certificate.tag() != "CERTIFICATE" { return Err("PROFILE_INVALID"); }
+            roots.add(rustls::pki_types::CertificateDer::from(certificate.into_contents()))
+                .map_err(|_| "PROFILE_INVALID")?;
+        }
+        builder.with_root_certificates(roots).with_no_client_auth()
+    };
+    #[cfg(not(feature = "fixture-profile"))]
+    let config = builder.with_platform_verifier().map_err(|_| "TLS_CONFIGURATION_FAILED")?.with_no_client_auth();
+    reqwest::Client::builder().use_preconfigured_tls(config)
+        .https_only(true).no_proxy().redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(5)).read_timeout(idle)
+        .timeout(total).build().map_err(|_| "TLS_CONFIGURATION_FAILED")
+}
+
+// Only called after cached signed metadata was revalidated against the journal.
+// A fresh installation has no resumable cache; failed attempts restart at zero
+// inside its own staging root, never using another install's partial file.
+async fn initial_archive_attempt(client: &reqwest::Client, profile: &Profile, offer: &Offer,
+    destination: &Path, cancel: Cancellation) -> Result<()> {
+    let mut url = profile.url(&offer.archive_url)?;
+    for redirects in 0..=3 {
+        cancel.check()?;
+        let mut response = cancel.wait(client.get(url.clone()).header("Accept-Encoding", "identity").send()).await?
+            .map_err(|error| if error.is_timeout() { "download_timeout" } else { "download_network_error" })?;
+        if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+            if redirects == 3 { return Err("download_redirect_limit"); }
+            let location = response.headers().get(reqwest::header::LOCATION).ok_or("download_redirect_invalid")?
+                .to_str().map_err(|_| "download_redirect_invalid")?;
+            if location.len() > 8192 { return Err("download_redirect_invalid"); }
+            let joined = url.join(location).map_err(|_| "download_redirect_invalid")?;
+            url = profile.url(joined.as_str()).map_err(|_| "download_redirect_forbidden")?;
+            continue;
+        }
+        if response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE { return Err("download_service_unavailable"); }
+        if response.status() != reqwest::StatusCode::OK { return Err("download_http_error"); }
+        let headers = response.headers();
+        if headers.get_all(reqwest::header::CONTENT_ENCODING).iter().any(|v|
+            !v.as_bytes().eq_ignore_ascii_case(b"identity")) { return Err("download_content_encoding"); }
+        if headers.get_all(reqwest::header::CONTENT_LENGTH).iter().any(|v|
+            v.to_str().ok().and_then(|value| value.parse::<u64>().ok()) != Some(offer.archive_length)) {
+            return Err("download_length_mismatch");
+        }
+        let parent = destination.parent().ok_or("download_path_unsafe")?;
+        let mut file = tempfile::Builder::new().prefix(".gsw-first-download-").tempfile_in(parent)
+            .map_err(|_| "download_write_failed")?;
+        let mut hash = Context::new(&SHA256);
+        let mut bytes = 0u64;
+        while let Some(chunk) = cancel.wait(response.chunk()).await?
+            .map_err(|error| if error.is_timeout() { "download_timeout" } else { "download_network_error" })? {
+            bytes = bytes.saturating_add(chunk.len() as u64);
+            if bytes > offer.archive_length { return Err("download_length_mismatch"); }
+            file.write_all(&chunk).map_err(|_| "download_write_failed")?;
+            hash.update(&chunk);
+        }
+        if bytes != offer.archive_length { return Err("download_length_mismatch"); }
+        let actual: String = hash.finish().as_ref().iter().map(|byte| format!("{byte:02x}")).collect();
+        if actual != offer.archive_sha256 { return Err("download_hash_mismatch"); }
+        cancel.check()?;
+        file.as_file().sync_all().map_err(|_| "download_write_failed")?;
+        cancel.check()?;
+        file.persist_noclobber(destination).map_err(|_| "download_publish_failed")?;
+        return Ok(());
+    }
+    Err("download_redirect_limit")
+}
+
+pub async fn fetch_initial_archive(profile: &Profile, offer: &Offer, destination: &Path, cancel: Cancellation) -> Result<()> {
+    let total = Duration::from_secs(30 * 60);
+    let client = https_client(profile, Duration::from_secs(30), total)?;
+    tokio::time::timeout(total, async {
+        for attempt in 0..3 {
+            let outcome = initial_archive_attempt(&client, profile, offer, destination, cancel).await;
+            match outcome {
+                Err("download_service_unavailable" | "download_timeout" | "download_network_error") if attempt < 2 => {
+                    cancel.wait(tokio::time::sleep(Duration::from_millis(500 << attempt))).await?;
+                }
+                Err("download_service_unavailable") => return Err("download_http_error"),
+                _ => return outcome,
+            }
+        }
+        Err("download_network_error")
+    }).await.map_err(|_| "download_total_timeout")?
+}
+
 #[derive(Clone, Debug)]
 pub struct SecureTransport {
     client: reqwest::Client,
@@ -53,26 +151,7 @@ pub struct SecureTransport {
 impl SecureTransport {
     pub fn new(profile: Profile, channel: &str, cancel: Cancellation, cached: Option<BTreeMap<String, Vec<u8>>>) -> Result<Self> {
         let channels = profile.channels.get(channel).ok_or("PROFILE_INVALID")?;
-        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-        let builder = rustls::ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions().map_err(|_| "TLS_CONFIGURATION_FAILED")?;
-        #[cfg(feature = "fixture-profile")]
-        let config = {
-            let mut roots = rustls::RootCertStore::empty();
-            let certificates = pem::parse_many(profile.fixture_ca_pem.as_deref().ok_or("PROFILE_INVALID")?).map_err(|_| "PROFILE_INVALID")?;
-            if certificates.is_empty() || certificates.len() > 8 { return Err("PROFILE_INVALID"); }
-            for certificate in certificates {
-                if certificate.tag() != "CERTIFICATE" { return Err("PROFILE_INVALID"); }
-                roots.add(rustls::pki_types::CertificateDer::from(certificate.into_contents())).map_err(|_| "PROFILE_INVALID")?;
-            }
-            builder.with_root_certificates(roots).with_no_client_auth()
-        };
-        #[cfg(not(feature = "fixture-profile"))]
-        let config = builder.with_platform_verifier().map_err(|_| "TLS_CONFIGURATION_FAILED")?.with_no_client_auth();
-        let client = reqwest::Client::builder().use_preconfigured_tls(config)
-            .https_only(true).no_proxy().redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(5)).read_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(15)).build().map_err(|_| "TLS_CONFIGURATION_FAILED")?;
+        let client = https_client(&profile, Duration::from_secs(5), Duration::from_secs(15))?;
         Ok(Self {
             client, metadata_base: channels.metadata_base.clone(), targets_base: channels.targets_base.clone(),
             profile: Arc::new(profile), raw: Arc::new(Mutex::new(BTreeMap::new())),

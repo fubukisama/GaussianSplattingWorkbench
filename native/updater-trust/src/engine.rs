@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use crate::network::{Cancellation, SecureTransport};
+use crate::network::{fetch_initial_archive, Cancellation, SecureTransport};
 use crate::policy::{is_hex, safe_token, validate_metadata, Offer, Profile, Request, Result, DESCRIPTOR_LIMIT, METADATA_LIMIT};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -215,7 +215,15 @@ fn validate_store(entries: &BTreeMap<String, String>, profile: &Profile, channel
 pub fn execute(request: Request, profile: Profile, cancel: Cancellation) -> Result<Value> {
     cancel.check()?;
     let directory = store_path(&request)?;
-    let anchor_path = Path::new(&request.installation_root).join(".update-trust-anchor");
+    let installation = Path::new(&request.installation_root);
+    let initial_archive = request.operation == "fetch_initial_archive";
+    if initial_archive {
+        match fs::symlink_metadata(installation.join("current.json")) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            _ => return Err("INITIAL_DESTINATION_OCCUPIED"),
+        }
+    }
+    let anchor_path = installation.join(".update-trust-anchor");
     let anchor = format!("gsw.trust_anchor/1\n{}\n", profile.identity()?);
     let anchor_exists = match fs::symlink_metadata(&anchor_path) {
         Ok(_) => true,
@@ -223,7 +231,7 @@ pub fn execute(request: Request, profile: Profile, cancel: Cancellation) -> Resu
         Err(_) => return Err("TRUST_STATE_UNAVAILABLE"),
     };
     // inspect_accepted is strictly read-only, including on a fresh installation.
-    let store = if request.operation == "inspect_accepted" || anchor_exists {
+    let store = if request.operation == "inspect_accepted" || anchor_exists || initial_archive {
         durable_anchor(&anchor_path, anchor.as_bytes(), false).map_err(|_| "TRUST_ANCHOR_REJECTED")?;
         Journal::open(&directory).map_err(|_| "TRUST_STATE_UNAVAILABLE")?
     } else {
@@ -244,7 +252,8 @@ pub fn execute(request: Request, profile: Profile, cancel: Cancellation) -> Resu
         let ledger = Ledger::parse(&entries, &profile)?;
         return Ok(json!({"schema":1,"ok":true,"code":"ACCEPTED_STATE","acceptedState":ledger}));
     }
-    let cached = if request.operation == "verify_cached" {
+    let cached_only = request.operation == "verify_cached" || initial_archive;
+    let cached = if cached_only {
         let mut raw = BTreeMap::new();
         for role in ["timestamp", "snapshot", "targets", "release"] {
             raw.insert(role.to_owned(), entries.get(&format!("raw/{}/{role}", request.channel))
@@ -285,7 +294,7 @@ pub fn execute(request: Request, profile: Profile, cancel: Cancellation) -> Resu
     let current = store.entries().map_err(|_| "TRUST_STATE_CORRUPT")?;
     validate_store(&current, &profile, &request.channel)?;
     let mut ledger = Ledger::parse(&current, &profile)?;
-    if request.operation == "verify_cached" && !ledger.accepted.get(&offer.build_id)
+    if cached_only && !ledger.accepted.get(&offer.build_id)
         .is_some_and(|accepted| accepted.descriptor_sha256s.contains(&descriptor_sha256)) { return Err("CACHED_OFFER_NOT_ACCEPTED"); }
     ledger.accept(&offer, &descriptor_sha256)?;
     let raw = if request.operation == "resolve" {
@@ -310,6 +319,17 @@ pub fn execute(request: Request, profile: Profile, cancel: Cancellation) -> Resu
     // or a revoked candidate, and every later download/activation failure.
     if ledger.revoked_build_ids.contains(&offer.build_id) { return Err("BUILD_REVOKED"); }
     if request.expected_build_id.as_ref().is_some_and(|id| id != &offer.build_id) { return Err("BUILD_ID_MISMATCH"); }
+    if initial_archive {
+        let downloads = installation.join("updates").join("downloads");
+        check_tree(&downloads)?;
+        if !downloads.is_dir() { return Err("download_path_unsafe"); }
+        let destination = downloads.join(format!("{}-{}.zip", offer.build_id, offer.archive_sha256));
+        match fs::symlink_metadata(&destination) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            _ => return Err("download_path_unsafe"),
+        }
+        runtime.block_on(fetch_initial_archive(&profile, &offer, &destination, cancel))?;
+    }
     let transport_policy = json!({"approvedHosts":profile.approved_hosts});
     #[cfg(feature = "fixture-profile")]
     let transport_policy = {

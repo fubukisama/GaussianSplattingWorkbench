@@ -181,7 +181,10 @@ def main() -> int:
     end_to_end.evidence, end_to_end.steps = args.evidence.resolve(), []
     end_to_end.helper = destination / "bin/GSW Update Fixture Helper.exe"
     end_to_end.select("A")
+    first_requests = issuer_summary(prep)
     child = install("first-install", destination, "BOOTSTRAP_COMMITTED", predicate=True)
+    first_archive_gets = issuer_summary(prep)["archiveGet"] - first_requests["archiveGet"]
+    assert 1 <= first_archive_gets <= 3, "the restricted endpoint must actually request the approved archive"
     pointer = json.loads((destination / "current.json").read_bytes())
     actual_slot = destination / "versions/fixture-a"
     expected_slot = Path(prep["root"]) / "package-A"
@@ -203,6 +206,8 @@ def main() -> int:
     stable = regular_tree(destination)
     install("occupied-root", destination, "BOOTSTRAP_DESTINATION_OCCUPIED")
     assert regular_tree(destination) == stable
+    helper_refusal = end_to_end.helper_request("occupied-helper-refusal", "--install-initial", "stable", success=False)
+    assert helper_refusal[-1]["code"] == "INITIAL_DESTINATION_OCCUPIED" and regular_tree(destination) == stable
     tampered = args.root / "Tampered bootstrap must not install"
     try:
         bootstrap_manifest.write_bytes(manifest_bytes + b"\n")
@@ -210,6 +215,30 @@ def main() -> int:
         assert not tampered.exists()
     finally:
         bootstrap_manifest.write_bytes(manifest_bytes)
+    bad_signature = args.root / "Wrong signature must not install"
+    end_to_end.select("wrong-key")
+    try:
+        before_wrong_key = issuer_summary(prep)["archiveGet"]
+        rejected = install("wrong-signature", bad_signature, "BOOTSTRAP_HELPER_FAILED")
+        assert rejected["helperCode"] == "TUF_REJECTED", rejected
+        assert not bad_signature.exists() and issuer_summary(prep)["archiveGet"] == before_wrong_key
+        assert regular_tree(destination) == stable
+    finally:
+        end_to_end.select("A")
+    blocked_redirect = args.root / "Forbidden redirect must not install"
+    control = Path(prep["controlFile"])
+    edited_control = control.with_name(control.name + ".first-install-redirect")
+    write_json(edited_control, {"repository": "A", "networkMode": "redirect-unapproved",
+        "faultPath": "/downloads/fixture-a-" + report["archiveSha256"][:12] + ".zip"})
+    os.replace(edited_control, control)
+    try:
+        before_redirect = issuer_summary(prep)["archiveGet"]
+        rejected = install("unapproved-redirect", blocked_redirect, "BOOTSTRAP_HELPER_FAILED")
+        assert rejected["helperCode"] == "download_redirect_forbidden", rejected
+        assert not blocked_redirect.exists() and issuer_summary(prep)["archiveGet"] == before_redirect + 1
+        assert regular_tree(destination) == stable
+    finally:
+        end_to_end.select("A")
     untrusted = args.root / "Corrupted signed asset must not install"
     end_to_end.select("badC")
     try:
@@ -229,6 +258,8 @@ def main() -> int:
         "sourceCommit": os.environ.get("GITHUB_SHA"), "sourceTree": prep["sourceTree"], "runId": os.environ.get("GITHUB_RUN_ID"),
         "bootstrapManifestSha256": manifest_hash, "executableSha256": expected_digest,
         "independentBootstrapFiles": len(source_files), "independentSlotFiles": len(slot_hashes),
+        "firstInstallArchiveGets": first_archive_gets, "initialHelperRefusedExistingInstallation": True,
+        "wrongSignatureRefusedBeforeArchiveGet": True, "unapprovedArchiveRedirectRefused": True,
         "signedOfferArchiveSha256": report["archiveSha256"], "stableEntryLaunched": observed_launch["windowShown"],
         "occupiedRootPreserved": True, "changedPinnedManifestRefused": True, "corruptSignedAssetRefused": True})
     return 0

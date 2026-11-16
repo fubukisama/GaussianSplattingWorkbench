@@ -14,7 +14,7 @@
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QProcess>
-#include <QSslSocket>
+#include <QStorageInfo>
 #include <QThread>
 #include <atomic>
 #include <cstdio>
@@ -226,6 +226,7 @@ int main(int argc, char **argv) {
   // Deliberately no root, key, feed, verified, unsigned, dev or TLS-bypass CLI.
   if (args.isEmpty() || args.size() > 3) return failure(QStringLiteral("INVALID_REQUEST"));
   const QString operation = args.takeFirst();
+  const bool initialInstall = operation == QLatin1String("--install-initial");
   const bool launchOperation = operation == QLatin1String("--verify-installed") ||
       operation == QLatin1String("--launch-current");
   const bool healthOperation = operation == QLatin1String("--startup-status");
@@ -234,10 +235,11 @@ int main(int argc, char **argv) {
   const QString channel = args.isEmpty() ? QStringLiteral("stable") : args.takeFirst();
   const QString expected = args.isEmpty() ? QString() : args.takeFirst();
   if (!QStringList{QStringLiteral("--check"), QStringLiteral("--prepare"),
-      QStringLiteral("--install"), QStringLiteral("--apply-prepared"), QStringLiteral("--rollback"),
+      QStringLiteral("--install"), QStringLiteral("--install-initial"), QStringLiteral("--apply-prepared"), QStringLiteral("--rollback"),
       QStringLiteral("--verify-installed"), QStringLiteral("--launch-current"), QStringLiteral("--startup-status"),
       QStringLiteral("--list-recovery")}.contains(operation) ||
       !QStringList{QStringLiteral("stable"), QStringLiteral("preview")}.contains(channel) ||
+      (initialInstall && channel != QLatin1String("stable")) ||
       (!expected.isEmpty() && operation != QLatin1String("--apply-prepared") && operation != QLatin1String("--rollback")) ||
       (operation == QLatin1String("--rollback") && expected.isEmpty())) return failure(QStringLiteral("INVALID_REQUEST"));
   QDir root(QCoreApplication::applicationDirPath());
@@ -272,6 +274,10 @@ int main(int argc, char **argv) {
       ? gsw::NativeInstallationLock::OpenMode::RequireExisting
       : gsw::NativeInstallationLock::OpenMode::CreateIfMissing);
   if (!lock.locked()) return failure(lock.error());
+  if (initialInstall) {
+    const QFileInfo current(root.filePath(QStringLiteral("current.json")));
+    if (current.exists() || current.isSymLink()) return failure(QStringLiteral("INITIAL_DESTINATION_OCCUPIED"));
+  }
   if (listOperation) {
     // Pure read-only catalog, including a corrupt/missing current pointer.
     // Return before the stdin cancellation reader or any network/state path.
@@ -326,7 +332,27 @@ int main(int argc, char **argv) {
     const QString downloads = root.filePath(QStringLiteral("updates/downloads"));
     gsw::activation::ensureDirectory(downloads);
     const QString archive = QDir(downloads).filePath(build + QLatin1Char('-') + archiveHash + QStringLiteral(".zip"));
-    if (operation != QLatin1String("--apply-prepared")) {
+    if (initialInstall) {
+      const qint64 length = qint64(trust.offer.value(QStringLiteral("archiveLength")).toDouble());
+      // Keep the existing conservative download margin; this path never
+      // reuses data in another installation or writes outside its staging root.
+      QStorageInfo storage(QDir::fromNativeSeparators(downloads).left(3));
+      storage.refresh();
+      if (length <= 0 || length > 4LL * 1024 * 1024 * 1024 || !storage.isValid() || !storage.isReady() ||
+          storage.isReadOnly() || storage.bytesAvailable() < length * 2 + 512LL * 1024 * 1024) {
+        return failure(QStringLiteral("download_insufficient_space"));
+      }
+      event(QStringLiteral("downloading"), {}, {{"receivedBytes", 0}, {"totalBytes", double(length)}, {"buildId", build}});
+      // Schannel may lack implicit outbound credentials under the restricted
+      // fresh-install token. Use the existing direct, verified TUF TLS client,
+      // with the same compiled server trust and no client authentication.
+      const auto downloaded = gsw::NativeUpdateTrustBridge::request(QStringLiteral("fetch_initial_archive"),
+          root.absolutePath(), channel, build, lock, cancellation.get());
+      if (!downloaded.ok) return failure(downloaded.code);
+      if (downloaded.offer != trust.offer || downloaded.update->descriptorDigest() != trust.update->descriptorDigest()) {
+        return failure(QStringLiteral("UPDATE_IDENTITY_CHANGED"));
+      }
+    } else if (operation != QLatin1String("--apply-prepared")) {
       gsw::NativeUpdateDownload downloader;
       gsw::NativeUpdateDownloadRequest request;
       request.url = QUrl(trust.offer.value(QStringLiteral("archiveUrl")).toString());
@@ -353,22 +379,7 @@ int main(int argc, char **argv) {
           [&](const auto &result) { downloaded = result; loop.quit(); });
       timer.start();
       downloader.start(request, trust.downloadPolicy); loop.exec(); timer.stop();
-      if (!downloaded.ok) {
-#ifdef GSW_UPDATER_FIXTURE_BUILD
-        const auto backend = QSslSocket::activeBackend();
-        const bool knownBackend = QStringList{QStringLiteral("schannel"), QStringLiteral("openssl"),
-            QStringLiteral("cert-only"), QStringLiteral("securetransport")}.contains(backend);
-        const QJsonObject trace{{"qtError", downloaded.networkError}, {"httpStatus", downloaded.httpStatus},
-            {"bytes", double(downloaded.receivedBytes)}, {"sslSupported", QSslSocket::supportsSsl()},
-            {"sspiStatus", double(downloaded.fixtureSspiStatus)}, {"contextCreation", downloaded.fixtureContextCreation},
-            {"tlsBackend", knownBackend ? backend : QStringLiteral("other")}};
-        // Only fixed, numeric or enumerated values from the isolated fixture.
-        event(QStringLiteral("failed"), downloaded.code, {{"fixtureDownloadTrace", trace}});
-        return 2;
-#else
-        return failure(downloaded.code);
-#endif
-      }
+      if (!downloaded.ok) return failure(downloaded.code);
     }
     if (cancellation->load()) return failure(QStringLiteral("CANCELLED"));
     event(QStringLiteral("verifying"));
