@@ -21,6 +21,14 @@ in the same change, with affected capabilities, limitations and verification or
 delivery status. Implementation, verification, publication and installation remain
 separate claims.
 
+## 2026-11-16
+
+- **Implemented:** [Fresh managed installation](docs/native_auto_update/FIRST_INSTALL.md)
+  verifies a pinned bootstrap kit and uses the existing signed updater before
+  creating the new installation. It refuses existing destinations and does not
+  migrate older installations. This change does not publish a public installer
+  or enable a production update feed.
+
 ## 2026-11-13
 
 - **Fixed:** With **View → Show Frame Rate** on, loaded point-cloud, mesh,

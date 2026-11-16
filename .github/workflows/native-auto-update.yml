@@ -11,7 +11,9 @@ on:
       - 'native/updater-space/**'
       - 'native/recovery/**'
       - 'native/bootstrap-fixture/**'
+      - 'native/first-install/**'
       - 'native/src/NativeDeveloperPublisher*'
+      - 'native/src/NativeFirstInstall*'
       - 'native/updater-trust/**'
       - 'native/third_party/tough/**'
       - 'native/third_party/miniz/**'
@@ -795,34 +797,96 @@ jobs:
           retention-days: 14
   isolated-first-bootstrap:
     runs-on: windows-2022
-    timeout-minutes: 10
+    # Allow for building Qt and the pinned trust Helper. The restricted native
+    # contract keeps its original client deadline and uses no production key.
+    timeout-minutes: 35
     env:
       TEMP: D:/gb/tmp
       TMP: D:/gb/tmp
+      CARGO_HOME: D:/gu/c
+      RUSTUP_HOME: D:/gu/r
+      CARGO_TARGET_DIR: D:/gb/rust
     steps:
       - name: Prepare owned bootstrap lab directories
         shell: pwsh
         run: New-Item -ItemType Directory -Path D:/gb/tmp,D:/gb/evidence -Force | Out-Null
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
+        id: python
         with:
           python-version: '3.12'
-      - name: Build the distinct static-CRT bootstrap and restricted terminal lab
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          dir: ${{ github.workspace }}/native/.qt-updater
+      - uses: actions/cache@v5
+        with:
+          path: |
+            D:/gu/c
+            D:/gu/r
+          key: updater-rust-1.99.1-${{ runner.os }}-${{ hashFiles('native/updater-trust/Cargo.lock') }}
+      - name: Build actual launch entry and issue isolated HTTPS TUF packages
         shell: pwsh
         run: |
+          & '${{ steps.python.outputs.python-path }}' -m venv D:/gb/qa
+          if($LASTEXITCODE -ne 0){throw 'Bootstrap lab Python unavailable.'}
+          $python='D:/gb/qa/Scripts/python.exe'
+          & $python -m pip install -r packaging/updates/fixture-requirements.txt
+          if($LASTEXITCODE -ne 0){throw 'Bootstrap fixture dependencies unavailable.'}
+          cmake -S native/updater -B D:/gb/updater -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=OFF -DGSW_UPDATER_FIXTURE_BUILD=ON
+          if($LASTEXITCODE -ne 0){throw 'Bootstrap lab native configure failed.'}
+          cmake --build D:/gb/updater --config Release --parallel --target gsw_update_application_fixture_a gsw_update_application_fixture_b gsw_update_fixture_launcher
+          if($LASTEXITCODE -ne 0){throw 'Bootstrap lab native windows and launcher build failed.'}
+          & $python -I -B scripts/prepare_native_update_end_to_end.py --remote-fixture-only --root D:/gb/lab `
+            --fixture-a 'D:/gb/updater/fixture-A/Release/Gaussian Scene Workbench.exe' `
+            --fixture-b 'D:/gb/updater/fixture-B/Release/Gaussian Scene Workbench.exe' `
+            --launcher 'D:/gb/updater/Release/Gaussian Scene Workbench Launcher.exe' `
+            --windeployqt (Get-Command windeployqt).Source --source-commit (git rev-parse HEAD).Trim() `
+            --source-tree (git rev-parse 'HEAD^{tree}').Trim()
+          if($LASTEXITCODE -ne 0){throw 'Bootstrap lab signed package preparation failed.'}
+      - name: Build the real Helper, pinned static-CRT bootstrap and restricted terminal lab
+        shell: pwsh
+        run: |
+          $prepared=Get-Content D:/gb/lab/preparation.json -Raw | ConvertFrom-Json
+          $env:GSW_UPDATER_FIXTURE_PROFILE_PATH=$prepared.profile
+          rustup toolchain install 1.99.1 --profile minimal --no-self-update
+          if($LASTEXITCODE -ne 0){throw 'Bootstrap lab pinned Rust unavailable.'}
+          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release `
+            --no-default-features --features fixture-cli --target-dir D:/gb/rust
+          if($LASTEXITCODE -ne 0){throw 'Bootstrap lab fixture trust build failed.'}
+          cmake -S native/updater -B D:/gb/updater -DGSW_TRUST_LIBRARY=D:/gb/rust/release/gsw_updater_trust.lib
+          if($LASTEXITCODE -ne 0){throw 'Bootstrap lab Helper configure failed.'}
+          cmake --build D:/gb/updater --config Release --parallel --target gsw_native_update_helper
+          if($LASTEXITCODE -ne 0){throw 'Bootstrap lab Helper build failed.'}
+          $pin=& D:/gb/qa/Scripts/python.exe -I -B scripts/test_native_bootstrap_fixture.py `
+            --prepare-bundle D:/gb/build/Release/bootstrap --preparation D:/gb/lab/preparation.json `
+            --helper 'D:/gb/updater/Release/GSW Update Fixture Helper.exe' --windeployqt (Get-Command windeployqt).Source
+          if($LASTEXITCODE -ne 0 -or $pin -cnotmatch '^[0-9a-f]{64}$'){throw 'Bootstrap manifest pin preparation failed.'}
           cmake -S native/bootstrap-fixture -B D:/gb/build -G 'Visual Studio 17 2022' -A x64 `
-            -DGSW_BOOTSTRAP_FIXTURE_ROOT=D:/gb/owned
+            -DGSW_BOOTSTRAP_FIXTURE_ROOT=D:/gb/owned "-DGSW_FIRST_INSTALL_MANIFEST_SHA256=$pin"
           if($LASTEXITCODE -ne 0){throw 'Isolated bootstrap lab configure failed.'}
           cmake --build D:/gb/build --config Release --parallel --target gsw_bootstrap_fixture gsw_bootstrap_terminal_harness gsw_bootstrap_loader_probe
           if($LASTEXITCODE -ne 0){throw 'Isolated bootstrap lab build failed.'}
+          # Check the separately buildable production carrier without giving it
+          # a usable distribution pin, signing, or running it in this lab.
+          cmake -S native/first-install -B D:/gb/production-compile -G 'Visual Studio 17 2022' -A x64 `
+            "-DGSW_FIRST_INSTALL_MANIFEST_SHA256=$('f'*64)"
+          if($LASTEXITCODE -ne 0){throw 'Standalone first-install configure failed.'}
+          cmake --build D:/gb/production-compile --config Release --parallel --target gsw_native_first_install
+          if($LASTEXITCODE -ne 0){throw 'Standalone first-install build failed.'}
       - name: Actual restricted medium-integrity terminal bootstrap contract
         shell: pwsh
         run: |
-          python -I -B scripts/test_native_bootstrap_fixture.py `
+          & D:/gb/qa/Scripts/python.exe -I -B scripts/test_native_bootstrap_fixture.py `
             --bootstrap 'D:/gb/build/Release/GSW Bootstrap Fixture.exe' `
             --harness 'D:/gb/build/Release/GSW Bootstrap Terminal Harness.exe' `
             --loader-probe 'D:/gb/build/Release/GSW Bootstrap Loader Probe.exe' `
-            --root D:/gb/owned --evidence D:/gb/evidence 2>&1 | Tee-Object D:/gb/evidence/first-bootstrap.log
+            --preparation D:/gb/lab/preparation.json --root D:/gb/owned --evidence D:/gb/evidence `
+            2>&1 | Tee-Object D:/gb/evidence/first-bootstrap.log
           if($LASTEXITCODE -ne 0){throw 'Restricted terminal native bootstrap contract failed.'}
       - name: Bind bootstrap lab evidence to source
         if: always()
@@ -833,6 +897,14 @@ jobs:
           [ordered]@{schema='gsw.bootstrap_isolated_evidence/1';testOnly=$true;production=$false;
             publisherAuthenticated=$false;sourceCommit=(git rev-parse HEAD).Trim();sourceTree=(git rev-parse 'HEAD^{tree}').Trim();
             runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/bootstrap-evidence/source.json
+          if(Test-Path D:/gb/lab/preparation.json){
+            $prepared=Get-Content D:/gb/lab/preparation.json -Raw | ConvertFrom-Json
+            $process=Get-CimInstance Win32_Process -Filter "ProcessId=$($prepared.serverPid)" -ErrorAction SilentlyContinue
+            if($process.CommandLine -and $process.CommandLine.Contains('native_update_network_fixture.py') -and
+                $process.CommandLine.Contains($prepared.root)){
+              Stop-Process -Id $prepared.serverPid -ErrorAction SilentlyContinue
+            }
+          }
       - uses: actions/upload-artifact@v7
         if: always()
         with:

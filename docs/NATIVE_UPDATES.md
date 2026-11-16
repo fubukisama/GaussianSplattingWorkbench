@@ -171,6 +171,12 @@ or restart Explorer. File-level readback does not prove immediate visual cache r
 保持します。固定タスクバーのリンクパスは変更せず、再固定や Explorer の再起動も行いません。
 ファイルの読戻しだけで既存キャッシュの即時表示更新を保証することはできません。
 
+## First installation / 首次安装 / 新規インストール
+
+[Fresh managed installation / 受管版首次安装 / 管理版の新規インストール](native_auto_update/FIRST_INSTALL.md)
+documents the separate bootstrap carrier for a new installation. It is not the
+fixed-directory Setup, developer publisher, or a migration of an existing root.
+
 ## Publisher commands / 发布命令 / 発行コマンド
 
 开发 CLI 使用稳定的机器 JSON 代码，不本地化。开发工具仅接纳本地未签名包，

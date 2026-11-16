@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "NativeBootstrapFixtureSecurity.h"
+#include "NativeFirstInstall.h"
 #include <iostream>
 
 using namespace gsw::bootstrapfixture;
@@ -20,9 +21,15 @@ int wmain(int argc, wchar_t **argv) {
     result["terminalEnvironment"] = clientEnvironmentFacts();
     need(result["terminalEnvironment"]["discoverableDeveloperTools"].empty() &&
         result["terminalEnvironment"]["sensitiveEnvironmentPresent"] == false, "BOOTSTRAP_CLIENT_DEVELOPER_DEPENDENCY");
-    // Recognized, authorized fixture intent reaches a genuine semantic stub.
-    // No install/trust/publication operation exists in this initial RED.
-    result["code"] = "BOOTSTRAP_NOT_IMPLEMENTED";
+    const auto installed = gsw::firstinstall::install(target);
+    result["ok"] = installed.committed;
+    result["targetMutated"] = installed.committed;
+    result["code"] = installed.code;
+    result["systemCode"] = installed.systemCode;
+    result["helperCode"] = installed.helperCode;
+    result["helperExitCode"] = installed.helperExitCode;
+    result["buildId"] = installed.buildId;
+    result["executableSha256"] = installed.executableSha256;
   } catch (const Failure &error) {
     result["code"] = error.code;
     result["systemCode"] = error.systemCode;
