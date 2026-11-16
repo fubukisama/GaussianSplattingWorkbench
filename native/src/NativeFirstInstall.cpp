@@ -12,6 +12,7 @@
 #include <map>
 #include <set>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #ifndef GSW_FIRST_INSTALL_MANIFEST_SHA256
@@ -282,30 +283,47 @@ std::wstring stageName() {
   need(StringFromGUID2(guid, id, 40) == 39, "BOOTSTRAP_STAGING_FAILED");
   return std::wstring(L".gsw-first-install-") + id;
 }
-void makePrivateStage(const Path &path) {
+struct LocalAllocation {
+  HLOCAL value = nullptr;
+  LocalAllocation() = default;
+  explicit LocalAllocation(HLOCAL owned) : value(owned) {}
+  LocalAllocation(const LocalAllocation &) = delete;
+  LocalAllocation &operator=(const LocalAllocation &) = delete;
+  ~LocalAllocation() { if (value) LocalFree(value); }
+};
+struct OwnedUserSecurity {
+  LocalAllocation descriptorMemory;
+  SECURITY_ATTRIBUTES attributes{};
+  explicit OwnedUserSecurity(bool container, bool inheritable);
+};
+
+OwnedUserSecurity::OwnedUserSecurity(bool container, bool inheritable) {
   HANDLE rawToken = nullptr;
-  win(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken) != FALSE, "BOOTSTRAP_STAGING_ACL_FAILED");
+  win(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken) != FALSE, "BOOTSTRAP_OWNED_ACL_FAILED");
   const Handle token(rawToken);
   DWORD size = 0;
   GetTokenInformation(token.value, TokenUser, nullptr, 0, &size);
-  need(size > 0 && size <= 65536, "BOOTSTRAP_STAGING_ACL_FAILED");
+  need(size > 0 && size <= 65536, "BOOTSTRAP_OWNED_ACL_FAILED");
   std::vector<unsigned char> bytes(size);
-  win(GetTokenInformation(token.value, TokenUser, bytes.data(), size, &size) != FALSE, "BOOTSTRAP_STAGING_ACL_FAILED");
-  struct LocalAllocation { HLOCAL value = nullptr; ~LocalAllocation() { if (value) LocalFree(value); } };
+  win(GetTokenInformation(token.value, TokenUser, bytes.data(), size, &size) != FALSE, "BOOTSTRAP_OWNED_ACL_FAILED");
   LPWSTR sid = nullptr;
   win(ConvertSidToStringSidW(reinterpret_cast<const TOKEN_USER *>(bytes.data())->User.Sid, &sid) != FALSE,
-      "BOOTSTRAP_STAGING_ACL_FAILED");
+      "BOOTSTRAP_OWNED_ACL_FAILED");
   const LocalAllocation sidMemory{sid};
-  // A writable shared parent must not make the prepared application, trust
-  // journal or DLLs writable by other ordinary accounts. Keep the new root
-  // per-user after same-volume rename as well.
-  const auto sddl = std::wstring(L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;") + sid + L")";
+  // Apply only to new installer-owned objects, never to the caller's token,
+  // the parent directory, an existing installation or any system object.
+  const auto sddl = std::wstring(container ? L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;" : L"D:P(A;;GA;;;SY)(A;;GA;;;") + sid + L")";
   PSECURITY_DESCRIPTOR descriptor = nullptr;
   win(ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1, &descriptor, nullptr) != FALSE,
-      "BOOTSTRAP_STAGING_ACL_FAILED");
-  const LocalAllocation descriptorMemory{descriptor};
-  SECURITY_ATTRIBUTES attributes{sizeof(attributes), descriptor, FALSE};
-  win(CreateDirectoryW(api(path).c_str(), &attributes) != FALSE, "BOOTSTRAP_STAGING_FAILED");
+      "BOOTSTRAP_OWNED_ACL_FAILED");
+  descriptorMemory.value = descriptor;
+  attributes = {sizeof(attributes), descriptor, inheritable};
+}
+void makePrivateStage(const Path &path) {
+  // A shared parent must not make the staged trust journal or DLLs writable
+  // by other ordinary accounts. The private DACL moves with the new root.
+  OwnedUserSecurity access(true, false);
+  win(CreateDirectoryW(api(path).c_str(), &access.attributes) != FALSE, "BOOTSTRAP_STAGING_FAILED");
 }
 struct Stage {
   const Path path;
@@ -383,26 +401,32 @@ Json installSignedSlot(const Path &program, DWORD &exit) {
   // Execute only the exact copied helper, not a command resolved by PATH.
   const auto executableLease = readFile(program);
   auto environment = childEnvironment(program.parent_path());
-  SECURITY_ATTRIBUTES attributes{sizeof(attributes), nullptr, TRUE};
-  HANDLE rawRead = nullptr, rawWrite = nullptr;
-  win(CreatePipe(&rawRead, &rawWrite, &attributes, 0) != FALSE, "BOOTSTRAP_HELPER_PIPE_FAILED");
-  Handle output(rawRead), childOutput(rawWrite);
-  Handle childInput(CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &attributes,
-      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-  Handle childError(CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &attributes,
-      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-  win(bool(childInput) && bool(childError) && SetHandleInformation(output.value, HANDLE_FLAG_INHERIT, 0),
-      "BOOTSTRAP_HELPER_PIPE_FAILED");
+  // The client's token can carry a default DACL without generic write. Give
+  // only this user/SYSTEM access to each new anonymous pipe. Supply EOF on a
+  // private stdin rather than relying on opening a shared device under that
+  // token. Only the three named standard-I/O handles may reach the Helper.
+  OwnedUserSecurity pipeAccess(false, true);
+  const auto pipe = [&](const char *code) {
+    HANDLE read = nullptr, write = nullptr;
+    win(CreatePipe(&read, &write, &pipeAccess.attributes, 0) != FALSE, code);
+    return std::pair(Handle(read), Handle(write));
+  };
+  auto [output, childOutput] = pipe("BOOTSTRAP_HELPER_STDOUT_PIPE_FAILED");
+  auto [errors, childError] = pipe("BOOTSTRAP_HELPER_STDERR_PIPE_FAILED");
+  auto [childInput, emptyInput] = pipe("BOOTSTRAP_HELPER_STDIN_PIPE_FAILED");
+  emptyInput.close();
+  win(SetHandleInformation(output.value, HANDLE_FLAG_INHERIT, 0) &&
+      SetHandleInformation(errors.value, HANDLE_FLAG_INHERIT, 0), "BOOTSTRAP_HELPER_HANDLE_FAILED");
   SIZE_T size = 0;
   InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
-  need(size > 0 && size < 65536, "BOOTSTRAP_HELPER_PIPE_FAILED");
+  need(size > 0 && size < 65536, "BOOTSTRAP_HELPER_HANDLE_FAILED");
   std::vector<unsigned char> buffer(size);
   const auto list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(buffer.data());
-  win(InitializeProcThreadAttributeList(list, 1, 0, &size) != FALSE, "BOOTSTRAP_HELPER_PIPE_FAILED");
+  win(InitializeProcThreadAttributeList(list, 1, 0, &size) != FALSE, "BOOTSTRAP_HELPER_HANDLE_FAILED");
   struct Cleanup { LPPROC_THREAD_ATTRIBUTE_LIST list; ~Cleanup() { DeleteProcThreadAttributeList(list); } } cleanup{list};
   HANDLE inherited[]{childInput.value, childOutput.value, childError.value};
   win(UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-      inherited, sizeof(inherited), nullptr, nullptr) != FALSE, "BOOTSTRAP_HELPER_PIPE_FAILED");
+      inherited, sizeof(inherited), nullptr, nullptr) != FALSE, "BOOTSTRAP_HELPER_HANDLE_FAILED");
   STARTUPINFOEXW startup{};
   startup.StartupInfo.cb = sizeof(startup);
   startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
@@ -412,8 +436,9 @@ Json installSignedSlot(const Path &program, DWORD &exit) {
   startup.lpAttributeList = list;
   // Path validation forbids quotes. Fixed arguments take no external input.
   std::wstring command = L"\"" + program.native() + L"\" --install stable";
+  OwnedUserSecurity processAccess(false, false);
   PROCESS_INFORMATION info{};
-  win(CreateProcessW(program.c_str(), command.data(), nullptr, nullptr, TRUE,
+  win(CreateProcessW(program.c_str(), command.data(), &processAccess.attributes, &processAccess.attributes, TRUE,
       DETACHED_PROCESS | EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
       environment.data(), program.parent_path().c_str(), &startup.StartupInfo, &info) != FALSE,
       "BOOTSTRAP_HELPER_START_FAILED");
@@ -421,22 +446,32 @@ Json installSignedSlot(const Path &program, DWORD &exit) {
   Handle thread(info.hThread);
   childInput.close(); childOutput.close(); childError.close();
   std::string outputBytes;
+  size_t errorBytes = 0;
   const auto start = GetTickCount64();
-  for (;;) {
-    for (;;) {
+  const auto drain = [](HANDLE stream, size_t &total, size_t limit, std::string *capture) {
+    // Bound each turn as well as the total; a noisy stream must not starve
+    // the other stream or prevent checking the child deadline.
+    for (int turn = 0; turn < 16; ++turn) {
       DWORD available = 0;
-      if (!PeekNamedPipe(output.value, nullptr, 0, nullptr, &available, nullptr)) {
-        win(GetLastError() == ERROR_BROKEN_PIPE, "BOOTSTRAP_HELPER_READ_FAILED"); break;
+      if (!PeekNamedPipe(stream, nullptr, 0, nullptr, &available, nullptr)) {
+        win(GetLastError() == ERROR_BROKEN_PIPE, "BOOTSTRAP_HELPER_READ_FAILED"); return false;
       }
-      if (!available) break;
-      need(outputBytes.size() + available <= 1024 * 1024, "BOOTSTRAP_HELPER_OUTPUT_LIMIT");
+      if (!available) return false;
       std::array<char, 4096> block{};
       DWORD read = 0;
-      win(ReadFile(output.value, block.data(), std::min<DWORD>(available, DWORD(block.size())), &read, nullptr) && read,
+      win(ReadFile(stream, block.data(), std::min<DWORD>(available, DWORD(block.size())), &read, nullptr) && read,
           "BOOTSTRAP_HELPER_READ_FAILED");
-      outputBytes.append(block.data(), read);
+      total += read;
+      need(total <= limit, "BOOTSTRAP_HELPER_OUTPUT_LIMIT");
+      if (capture) capture->append(block.data(), read);
     }
-    if (helper.finished) break;
+    return true;
+  };
+  size_t outputTotal = 0;
+  for (;;) {
+    const bool moreOutput = drain(output.value, outputTotal, 8 * 1024 * 1024, &outputBytes);
+    const bool moreErrors = drain(errors.value, errorBytes, 1024 * 1024, nullptr);
+    if (helper.finished && !moreOutput && !moreErrors) break;
     if (WaitForSingleObject(helper.process.value, 20) == WAIT_OBJECT_0) helper.finished = true;
     else need(GetTickCount64() - start < helperBudgetMs, "BOOTSTRAP_HELPER_DEADLINE");
   }
