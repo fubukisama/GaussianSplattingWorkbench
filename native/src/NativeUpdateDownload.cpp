@@ -197,6 +197,7 @@ public:
     if (!active || finishing) return;
     finishing = true;
     deadline.stop();
+    const int networkError = reply ? int(reply->error()) : 0;
     if (reply) { QObject::disconnect(reply, nullptr, q, nullptr); reply->abort(); reply->deleteLater(); reply = nullptr; }
     part.close();
     if (output) { output->cancelWriting(); output.reset(); }
@@ -214,6 +215,7 @@ public:
     result.ok = ok; result.cancelled = cancelled; result.code = code;
     result.filePath = ok ? request.destinationPath : QString();
     result.receivedBytes = bytes; result.httpStatus = httpStatus; result.resumed = resumed;
+    result.networkError = networkError;
     const QPointer<NativeUpdateDownload> alive(q);
     if (!transition(ok ? State::Completed : cancelled ? State::Cancelled : State::Failed) || !alive) return;
     active = false; finishing = false;

@@ -538,6 +538,28 @@ Result install(const std::wstring &destination) {
       const auto code = activated.value("code", std::string());
       if (code.size() <= 96 && std::all_of(code.begin(), code.end(), [](char c) {
             return safeAscii(c) && c != '.' && c != '-'; })) result.helperCode = code;
+#ifdef GSW_FIRST_INSTALL_FIXTURE
+      const auto trace = activated.value("fixtureDownloadTrace", Json::object());
+      if (trace.is_object() && trace.contains("qtError") && trace.contains("httpStatus") && trace.contains("bytes") &&
+          trace.contains("sslSupported") && trace.contains("tlsBackend") && trace["qtError"].is_number_unsigned() &&
+          trace["httpStatus"].is_number_unsigned() && trace["bytes"].is_number_unsigned() &&
+          trace["sslSupported"].is_boolean() && trace["tlsBackend"].is_string()) {
+        const auto error = trace["qtError"].get<std::uint64_t>();
+        const auto status = trace["httpStatus"].get<std::uint64_t>();
+        const auto received = trace["bytes"].get<std::uint64_t>();
+        const auto backend = trace["tlsBackend"].get<std::string>();
+        if (error <= 999 && status <= 599 && received <= 4ull * 1024 * 1024 * 1024 &&
+            (backend == "schannel" || backend == "openssl" || backend == "cert-only" ||
+             backend == "securetransport" || backend == "other")) {
+          result.helperDownloadTrace = true;
+          result.helperQtNetworkError = unsigned(error);
+          result.helperHttpStatus = unsigned(status);
+          result.helperReceivedBytes = received;
+          result.helperSslSupported = trace["sslSupported"].get<bool>();
+          result.helperTlsBackend = backend;
+        }
+      }
+#endif
     }
     need(exit == 0 && activated.is_object() && activated.value("schema", "") == "gsw.update_event/1" &&
         activated.value("phase", "") == "activated" && activated.value("code", "") == "NEXT_LAUNCH",

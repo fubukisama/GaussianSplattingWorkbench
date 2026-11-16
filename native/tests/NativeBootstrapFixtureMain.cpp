@@ -28,6 +28,11 @@ int wmain(int argc, wchar_t **argv) {
     result["systemCode"] = installed.systemCode;
     result["helperCode"] = installed.helperCode;
     result["helperExitCode"] = installed.helperExitCode;
+    if (installed.helperDownloadTrace) {
+      result["helperDownloadTrace"] = {{"qtError", installed.helperQtNetworkError},
+        {"httpStatus", installed.helperHttpStatus}, {"bytes", installed.helperReceivedBytes},
+        {"sslSupported", installed.helperSslSupported}, {"tlsBackend", installed.helperTlsBackend}};
+    }
     result["buildId"] = installed.buildId;
     result["executableSha256"] = installed.executableSha256;
   } catch (const Failure &error) {

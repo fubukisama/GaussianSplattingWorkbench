@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include <cstdint>
 #include <string>
 
 namespace gsw::firstinstall {
@@ -8,6 +9,12 @@ struct Result {
   std::string code, helperCode, buildId, executableSha256;
   unsigned long systemCode = 0;
   unsigned long helperExitCode = 0;
+#ifdef GSW_FIRST_INSTALL_FIXTURE
+  bool helperDownloadTrace = false, helperSslSupported = false;
+  unsigned int helperQtNetworkError = 0, helperHttpStatus = 0;
+  std::uint64_t helperReceivedBytes = 0;
+  std::string helperTlsBackend;
+#endif
 };
 
 // This first-install-only entry takes a fresh local destination, not trust

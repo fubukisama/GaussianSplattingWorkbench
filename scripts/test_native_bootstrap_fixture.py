@@ -59,6 +59,27 @@ def lab_preparation(path: Path):
     return prep
 
 
+def issuer_summary(prep):
+    # Read only the owned issuer's fixed log, then discard URL fragments,
+    # headers and content. The artifact gets counts, never network text.
+    log = Path(prep["root"]) / "https/requests.jsonl"
+    counts = {"metadataGet": 0, "archiveGet": 0, "archiveWithRange": 0, "otherGet": 0}
+    if not log.exists():
+        return counts
+    if log.stat().st_size > 1024 * 1024:
+        return {"logOutsideEvidenceLimit": True}
+    for line in log.read_text(encoding="utf-8").splitlines():
+        row = json.loads(line)
+        if row["path"].startswith("/repository/"):
+            counts["metadataGet"] += 1
+        elif row["path"].startswith("/downloads/"):
+            counts["archiveGet"] += 1
+            counts["archiveWithRange"] += bool(row.get("range"))
+        else:
+            counts["otherGet"] += 1
+    return counts
+
+
 def prepare_bundle(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument("--prepare-bundle", type=Path, required=True)
@@ -128,7 +149,12 @@ def main() -> int:
         if args.loader_probe:
             command.extend(["--loader-probe", str(args.loader_probe.absolute()),
                             "--expected-probe-sha256", digest(args.loader_probe)])
-        result = subprocess.run(command, capture_output=True, timeout=210, creationflags=subprocess.CREATE_NO_WINDOW)
+        prior_requests = issuer_summary(prep)
+        try:
+            result = subprocess.run(command, capture_output=True, timeout=210, creationflags=subprocess.CREATE_NO_WINDOW)
+        finally:
+            write_json(args.evidence / (label + "-issuer.json"), {"schema": "gsw.fixture_issuer_counts/1",
+                "testOnly": True, "before": prior_requests, "after": issuer_summary(prep)})
         native = json.loads(result.stdout)
         write_json(args.evidence / (label + "-tracer.json"), {"schema": "gsw.bootstrap_first_install_tracer/1",
             "testOnly": True, "production": False, "harnessExitCode": result.returncode, "harness": native,

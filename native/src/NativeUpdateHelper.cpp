@@ -14,6 +14,7 @@
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QProcess>
+#include <QSslSocket>
 #include <QThread>
 #include <atomic>
 #include <cstdio>
@@ -352,7 +353,21 @@ int main(int argc, char **argv) {
           [&](const auto &result) { downloaded = result; loop.quit(); });
       timer.start();
       downloader.start(request, trust.downloadPolicy); loop.exec(); timer.stop();
-      if (!downloaded.ok) return failure(downloaded.code);
+      if (!downloaded.ok) {
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+        const auto backend = QSslSocket::activeBackend();
+        const bool knownBackend = QStringList{QStringLiteral("schannel"), QStringLiteral("openssl"),
+            QStringLiteral("cert-only"), QStringLiteral("securetransport")}.contains(backend);
+        const QJsonObject trace{{"qtError", downloaded.networkError}, {"httpStatus", downloaded.httpStatus},
+            {"bytes", double(downloaded.receivedBytes)}, {"sslSupported", QSslSocket::supportsSsl()},
+            {"tlsBackend", knownBackend ? backend : QStringLiteral("other")}};
+        // Only fixed, numeric or enumerated values from the isolated fixture.
+        event(QStringLiteral("failed"), downloaded.code, {{"fixtureDownloadTrace", trace}});
+        return 2;
+#else
+        return failure(downloaded.code);
+#endif
+      }
     }
     if (cancellation->load()) return failure(QStringLiteral("CANCELLED"));
     event(QStringLiteral("verifying"));

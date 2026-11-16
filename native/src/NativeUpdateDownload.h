@@ -40,6 +40,7 @@ struct NativeUpdateDownloadResult final {
   qint64 receivedBytes = 0;
   int httpStatus = 0;
   bool resumed = false;
+  int networkError = 0; // Numeric Qt classification only, not a URL or error string.
 };
 
 class NativeUpdateDownload final : public QObject {

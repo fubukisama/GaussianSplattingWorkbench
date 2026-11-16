@@ -2,6 +2,16 @@ name: Native Auto Update
 
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: 'Run the whole updater suite or only the isolated Windows first-install contract'
+        type: choice
+        options: [full, first-install]
+        default: full
+      expected_commit:
+        description: 'Required exact main SHA when running first-install only'
+        type: string
+        required: false
   push:
     branches: [main]
     paths:
@@ -59,6 +69,7 @@ env:
 
 jobs:
   isolated-profile-configuration:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.scope != 'first-install' }}
     runs-on: windows-2022
     timeout-minutes: 25
     env:
@@ -156,6 +167,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-source-closure:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.scope != 'first-install' }}
     runs-on: windows-2022
     timeout-minutes: 30
     env:
@@ -199,6 +211,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-developer-core:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.scope != 'first-install' }}
     runs-on: windows-2022
     timeout-minutes: 10
     env:
@@ -265,6 +278,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-update-ui:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.scope != 'first-install' }}
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -317,6 +331,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   release-policy-contracts:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.scope != 'first-install' }}
     runs-on: windows-2022
     timeout-minutes: 5
     steps:
@@ -342,6 +357,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   isolated-contracts:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.scope != 'first-install' }}
     runs-on: windows-2022
     timeout-minutes: 15
     steps:
@@ -432,6 +448,7 @@ jobs:
           retention-days: 14
 
   isolated-trust:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.scope != 'first-install' }}
     runs-on: windows-2022
     timeout-minutes: 30
     env:
@@ -516,6 +533,7 @@ jobs:
           retention-days: 14
 
   isolated-stable-entry:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.scope != 'first-install' }}
     runs-on: windows-2022
     timeout-minutes: 35
     env:
@@ -680,6 +698,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
   isolated-signed-automatic-ui:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.scope != 'first-install' }}
     runs-on: windows-2022
     timeout-minutes: 35
     env:
@@ -807,6 +826,14 @@ jobs:
       RUSTUP_HOME: D:/gu/r
       CARGO_TARGET_DIR: D:/gb/rust
     steps:
+      - name: Check focused-run source identity
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.scope == 'first-install' }}
+        shell: pwsh
+        env:
+          GSW_EXPECTED_SOURCE: ${{ inputs.expected_commit }}
+        run: |
+          if($env:GITHUB_REF -cne 'refs/heads/main' -or $env:GSW_EXPECTED_SOURCE -cnotmatch '^[0-9a-f]{40}$' -or
+              $env:GITHUB_SHA -cne $env:GSW_EXPECTED_SOURCE){throw 'Focused first-install source identity differs.'}
       - name: Prepare owned bootstrap lab directories
         shell: pwsh
         run: New-Item -ItemType Directory -Path D:/gb/tmp,D:/gb/evidence -Force | Out-Null
