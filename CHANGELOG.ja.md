@@ -24,7 +24,7 @@ Gaussian Splatting Workbench の利用者向け変更を新しい順に記録し
 - **実装済み：**[管理版の新規インストール](docs/native_auto_update/FIRST_INSTALL.md)は、
   ダイジェストで固定したブートストラップを確認し、既存の署名付き更新で新規ディレクトリーに導入します。
   既存の導入先を拒否し、旧版の移行は行いません。本ソース変更では公開インストーラーの配布や
-  本番の更新元の有効化は行いません。
+  本番の更新元の有効化は行いません。[ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/499e9ae963eb586612ca70af247d81e1e560681e)
 
 ## 2026-11-13
 

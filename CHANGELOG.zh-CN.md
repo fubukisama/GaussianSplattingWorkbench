@@ -21,7 +21,7 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 
 - **已实现：**[受管版首次安装](docs/native_auto_update/FIRST_INSTALL.md)先核验引导包，
   再通过现有签名更新流程安装到新目录。拒绝已有目录，不迁移旧版。本次源码变更
-  不发布公开安装器，也不启用生产更新源。
+  不发布公开安装器，也不启用生产更新源。[源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/499e9ae963eb586612ca70af247d81e1e560681e)
 
 ## 2026-11-13
 
