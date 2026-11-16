@@ -26,6 +26,10 @@ Gaussian Splatting Workbench の利用者向け変更を新しい順に記録し
   既存の導入先を拒否し、旧版の移行は行いません。本ソース変更では公開インストーラーの配布や
   本番の更新元の有効化は行いません。[ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/499e9ae963eb586612ca70af247d81e1e560681e)
 
+- **初回ダウンロード：**署名付きメタデータの HTTPS クライアントを再利用し、初回導入時に Schannel の
+  暗黙的な送信資格情報を不要にしました。署名済みアーカイブの検証と、既存版の更新経路は維持します。
+  [ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/5d52c290eb3536ace94ebeb1ef5b944b9707a048)
+
 ## 2026-11-13
 
 - **修正：**「ビュー → フレームレートを表示」が有効な場合、点群・メッシュ・3DGS・2DGS の

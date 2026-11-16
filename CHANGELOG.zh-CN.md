@@ -23,6 +23,10 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
   再通过现有签名更新流程安装到新目录。拒绝已有目录，不迁移旧版。本次源码变更
   不发布公开安装器，也不启用生产更新源。[源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/499e9ae963eb586612ca70af247d81e1e560681e)
 
+- **首装下载：**复用已验证的元数据 HTTPS 客户端，首次安装不再依赖 Schannel 的隐式外发凭据。
+  保留签名安装包校验，已有安装的更新路径不变。
+  [源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/5d52c290eb3536ace94ebeb1ef5b944b9707a048)
+
 ## 2026-11-13
 
 - **修复：**开启「视图 → 显示帧率」后，点云、网格、3DGS 和 2DGS 视口停止操作也继续绘制，

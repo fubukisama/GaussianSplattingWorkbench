@@ -29,6 +29,11 @@ separate claims.
   migrate older installations. This change does not publish a public installer
   or enable a production update feed. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/499e9ae963eb586612ca70af247d81e1e560681e)
 
+- **First-install download:** Reuse the verified metadata HTTPS client so a
+  fresh install does not depend on Schannel's implicit outbound credentials.
+  Keep signed archive verification and the existing-install update path.
+  [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/5d52c290eb3536ace94ebeb1ef5b944b9707a048)
+
 ## 2026-11-13
 
 - **Fixed:** With **View → Show Frame Rate** on, loaded point-cloud, mesh,
