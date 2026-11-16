@@ -495,6 +495,8 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../gaussian-splatting/submodules/
 install(DIRECTORY third_party/ DESTINATION source/native/third_party PATTERN "2dgs-surfel" EXCLUDE)
 install(FILES CMakeLists.txt resources.qrc lucide_icons.qrc build_manifest.json README.md LICENSE.md
   DESTINATION source/native)
+install(FILES first-install/CMakeLists.txt first-install/FirstInstallTarget.cmake
+  DESTINATION source/native/first-install)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../COPYING" "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE"
   "${CMAKE_CURRENT_SOURCE_DIR}/../THIRD_PARTY_LICENSES.md" DESTINATION source)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py"
@@ -506,6 +508,10 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/write_native_release_manif
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_installation.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_UPDATES.md" DESTINATION docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_UPDATES.md" DESTINATION source/docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/native_auto_update/FIRST_INSTALL.md"
+  DESTINATION docs/native_auto_update)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/native_auto_update/FIRST_INSTALL.md"
+  DESTINATION source/docs/native_auto_update)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_DEVELOPER_PUBLISHER.md" DESTINATION docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_DEVELOPER_PUBLISHER.md" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_package_launch.ps1" DESTINATION source/scripts)
