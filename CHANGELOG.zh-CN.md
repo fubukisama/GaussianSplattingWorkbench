@@ -22,7 +22,7 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 - **更改：**[原生软件更新](docs/NATIVE_UPDATES.md)在启动约 10 秒后静默检查，
   此后每 4 小时检查。开启自动下载后，运行期间只下载和验签，正常退出才安装。
   不强制重启，不改训练任务的退出保护；固定启动器和签名校验不变。
-  本次变更不启用公开更新源。
+  本次变更不启用公开更新源。[源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/726f32a42ea807e2df32255ce235706e23f4e139)
 
 ## 2026-11-16
 

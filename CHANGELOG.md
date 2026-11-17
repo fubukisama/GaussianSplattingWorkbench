@@ -28,7 +28,7 @@ separate claims.
   enabled, verified updates install on an accepted normal exit, not while the
   current build is in use. No forced restart or change to training exit guards.
   The fixed launcher and signature checks are unchanged. This change does not
-  enable the public update feed.
+  enable the public update feed. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/726f32a42ea807e2df32255ce235706e23f4e139)
 
 ## 2026-11-16
 
