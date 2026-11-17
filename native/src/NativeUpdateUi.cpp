@@ -10,6 +10,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -32,6 +33,9 @@
 namespace gsw {
 namespace {
 QString text(const char *source) { return QCoreApplication::translate("Workbench", source); }
+constexpr int startupCheckDelayMs = 10'000;
+constexpr int checkIntervalMs = 4 * 60 * 60 * 1000;
+constexpr int exitInstallWaitMs = 30'000;
 class UpdateController final : public QObject {
 public:
   explicit UpdateController(QWidget *window) : QObject(window), mWindow(window) {
@@ -48,39 +52,73 @@ public:
     if (version.cdUp()) mRunningBuild = version.dirName();
     mPrepared = !mRoot.isEmpty() && QFileInfo(QDir(mRoot).filePath(QStringLiteral("updates/prepared.json"))).isFile();
     AppLanguage::onChanged(this, [this] { refresh(); });
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this,
+        [this] { installOnAcceptedExit(); });
     auto *timer = new QTimer(this);
-    timer->setInterval(30 * 60 * 1000);
+    timer->setInterval(checkIntervalMs);
     connect(timer, &QTimer::timeout, this, [this] { automaticCheck(); });
-    timer->start();
-    QTimer::singleShot(30000, this, [this] { automaticCheck(); });
+    QTimer::singleShot(startupCheckDelayMs, this, [this, timer] { automaticCheck(); timer->start(); });
   }
-  ~UpdateController() override {
-    if (!mProcess) return;
-    // Closing the app never kills training or interrupts an atomic activation.
-    // Ask only the owned update helper to cancel, then leave it independent.
-    mProcess->write("cancel\n"); mProcess->closeWriteChannel();
-    disconnect(mProcess, nullptr, this, nullptr);
-    mProcess->setParent(nullptr);
-    connect(mProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), mProcess, &QObject::deleteLater);
-  }
+  ~UpdateController() override { releaseHelper(true); }
+  void setCloseAccepted(bool accepted) { mCloseAccepted = accepted; }
   void showDialog() {
     if (!mDialog) createDialog();
     refresh(); mDialog->show(); // Only an explicit Help action reaches here.
   }
 private:
+  void releaseHelper(bool cancel) {
+    if (!mProcess) return;
+    auto *process = mProcess.data();
+    mProcess.clear();
+    if (cancel) process->write("cancel\n");
+    process->closeWriteChannel();
+    disconnect(process, nullptr, this, nullptr);
+    // The destructing window must not kill a helper during atomic installation.
+    process->setParent(nullptr);
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), process, &QObject::deleteLater);
+  }
   QString channel() const {
     const auto value = QSettings().value(QStringLiteral("updates/channel"), QStringLiteral("stable")).toString();
     return value == QLatin1String("preview") ? value : QStringLiteral("stable");
+  }
+  bool automaticPreparationEnabled() const {
+    return QSettings().value(QStringLiteral("updates/automaticCheck"), true).toBool() &&
+        QSettings().value(QStringLiteral("updates/prepareForNextLaunch"), false).toBool();
+  }
+  void installOnAcceptedExit() {
+    if (!mCloseAccepted || mProcess || mRoot.isEmpty() || !mPrepared || !automaticPreparationEnabled()) return;
+    if (QDateTime::currentDateTimeUtc() < QSettings().value(QStringLiteral("updates/deferredUntil")).toDateTime()) return;
+    // The on-disk marker is an intent, not trust evidence. Pass the exact
+    // build to the existing helper: it must re-admit the signed cached offer,
+    // check the full archive and acquire the normal installation lock.
+    const auto markerPath = QDir(mRoot).filePath(QStringLiteral("updates/prepared.json"));
+    const QFileInfo markerInfo(markerPath);
+    if (!markerInfo.isFile() || markerInfo.isSymLink()) return;
+    QFile marker(markerPath);
+    if (!marker.open(QIODevice::ReadOnly)) return;
+    const auto bytes = marker.read(16 * 1024 + 1);
+    marker.close();
+    if (bytes.size() > 16 * 1024) return;
+    const auto prepared = QJsonDocument::fromJson(bytes).object();
+    const auto selectedChannel = channel();
+    const auto build = prepared.value(QStringLiteral("buildId")).toString();
+    if (prepared.value(QStringLiteral("schema")).toString() != QLatin1String("gsw.prepared_update/1") ||
+        prepared.value(QStringLiteral("channel")).toString() != selectedChannel ||
+        build.isEmpty() || build == mRunningBuild ||
+        QSettings().value(QStringLiteral("updates/skipped/") + selectedChannel).toStringList().contains(build)) return;
+    begin(QStringLiteral("--apply-prepared"), false, build);
+    // Only after the last user window accepted close, allow the local (no
+    // download) installation to finish before the ordinary next launch.
+    // Do not run a nested GUI event loop or kill an installation on timeout.
+    if (mProcess && !mProcess->waitForFinished(exitInstallWaitMs)) releaseHelper(false);
   }
   void automaticCheck() {
     if (mProcess || !QSettings().value(QStringLiteral("updates/automaticCheck"), true).toBool()) return;
     const auto now = QDateTime::currentDateTimeUtc();
     if (now < QSettings().value(QStringLiteral("updates/deferredUntil")).toDateTime()) return;
-    const auto previous = QSettings().value(QStringLiteral("updates/lastAttempt")).toDateTime();
-    if (previous.isValid() && previous <= now && previous.secsTo(now) < 24 * 60 * 60) return;
     begin(QStringLiteral("--check"), true);
   }
-  void begin(const QString &operation, bool background = false) {
+  void begin(const QString &operation, bool background = false, const QString &expectedBuild = {}) {
     if (mProcess) return;
     mLastOperation = operation; mPhase = QStringLiteral("checking"); mCode.clear();
     mReceived = 0; mTotal = 0;
@@ -135,21 +173,21 @@ private:
         mProtocolError = true; mCode = QStringLiteral("UPDATE_PROTOCOL_INVALID");
       }
       if (exit != QProcess::NormalExit || code != 0 || mProtocolError) {
+        if (operation == QLatin1String("--prepare")) mPrepared = false;
         mPhase = QStringLiteral("failed"); if (mCode.isEmpty()) mCode = QStringLiteral("HELPER_FAILED");
       }
       refresh();
       const auto skipped = QSettings().value(QStringLiteral("updates/skipped/") + mRequestChannel).toStringList();
-      const bool automatic = background && QSettings().value(QStringLiteral("updates/automaticCheck"), true).toBool() &&
-          QSettings().value(QStringLiteral("updates/prepareForNextLaunch"), false).toBool() && channel() == mRequestChannel;
+      const bool automatic = background && automaticPreparationEnabled() && channel() == mRequestChannel;
       if (exit == QProcess::NormalExit && code == 0 && !mProtocolError && mPhase != QLatin1String("failed") && automatic) {
         if (operation == QLatin1String("--check") && mOffer.value(QStringLiteral("buildId")).toString() != mRunningBuild &&
             !skipped.contains(mOffer.value(QStringLiteral("buildId")).toString()))
           QTimer::singleShot(0, this, [this] { begin(QStringLiteral("--prepare"), true); });
-        else if (operation == QLatin1String("--prepare") && mPrepared)
-          QTimer::singleShot(0, this, [this] { begin(QStringLiteral("--apply-prepared"), true); });
       }
     });
-    process->setProgram(helper); process->setArguments({operation, mRequestChannel});
+    QStringList arguments{operation, mRequestChannel};
+    if (!expectedBuild.isEmpty()) arguments.append(expectedBuild);
+    process->setProgram(helper); process->setArguments(arguments);
     process->setWorkingDirectory(mRoot); process->start(); refresh();
   }
   void protocolFailure() {
@@ -182,10 +220,10 @@ private:
     });
     auto *check = AppLanguage::text(new QCheckBox(dialog), AppLanguage::source("后台自动检查（不弹出窗口）"));
     check->setChecked(QSettings().value(QStringLiteral("updates/automaticCheck"), true).toBool());
-    connect(check, &QCheckBox::toggled, this, [](bool value) { QSettings().setValue(QStringLiteral("updates/automaticCheck"), value); }); layout->addWidget(check);
-    auto *prepare = AppLanguage::text(new QCheckBox(dialog), AppLanguage::source("自动下载并在下次启动时使用，不中断当前任务"));
+    connect(check, &QCheckBox::toggled, this, [this](bool value) { QSettings().setValue(QStringLiteral("updates/automaticCheck"), value); refresh(); }); layout->addWidget(check);
+    auto *prepare = AppLanguage::text(new QCheckBox(dialog), AppLanguage::source("自动下载并在正常退出时安装"));
     prepare->setChecked(QSettings().value(QStringLiteral("updates/prepareForNextLaunch"), false).toBool());
-    connect(prepare, &QCheckBox::toggled, this, [](bool value) { QSettings().setValue(QStringLiteral("updates/prepareForNextLaunch"), value); }); layout->addWidget(prepare);
+    connect(prepare, &QCheckBox::toggled, this, [this](bool value) { QSettings().setValue(QStringLiteral("updates/prepareForNextLaunch"), value); refresh(); }); layout->addWidget(prepare);
     auto *buttons = new QGridLayout; layout->addLayout(buttons);
     int buttonIndex = 0;
     const auto button = [dialog, buttons, &buttonIndex](const char *source) { auto *b = new QPushButton(dialog); AppLanguage::bind(b, "text", source); buttons->addWidget(b, buttonIndex / 3, buttonIndex % 3); ++buttonIndex; return b; };
@@ -222,7 +260,9 @@ private:
     else if (mPhase == QLatin1String("downloading")) status = text(AppLanguage::source("正在下载：%1 / %2 MiB")).arg(mReceived / (1024 * 1024), 0, 'f', 1).arg(mTotal / (1024 * 1024), 0, 'f', 1);
     else if (mPhase == QLatin1String("verifying")) status = text(AppLanguage::source("正在验证签名和文件完整性…"));
     else if (mPhase == QLatin1String("staging")) status = text(AppLanguage::source("正在准备独立的新版本目录…"));
-    else if (mPhase == QLatin1String("prepared")) status = text(AppLanguage::source("更新已下载并验证，可以准备下次启动。"));
+    else if (mPhase == QLatin1String("prepared")) status = automaticPreparationEnabled()
+        ? text(AppLanguage::source("更新已下载并验证，将在正常退出时安装。"))
+        : text(AppLanguage::source("更新已下载并验证，可以准备下次启动。"));
     else if (mPhase == QLatin1String("activated")) status = text(AppLanguage::source("下次启动时生效；当前窗口和任务将继续运行。"));
     else if (mPhase == QLatin1String("cancelling")) status = text(AppLanguage::source("正在取消，保留可安全续传的数据…"));
     else if (mPhase == QLatin1String("skipped")) status = text(AppLanguage::source("自动更新已跳过此构建；仍可手动下载。"));
@@ -253,7 +293,7 @@ private:
   QByteArray mBuffer;
   QJsonObject mOffer;
   double mReceived = 0, mTotal = 0;
-  bool mPrepared = false, mProtocolError = false;
+  bool mPrepared = false, mProtocolError = false, mCloseAccepted = false;
 };
 }
 void installNativeUpdateUi(QMenu *helpMenu, QWidget *window) {
@@ -262,5 +302,11 @@ void installNativeUpdateUi(QMenu *helpMenu, QWidget *window) {
   auto *action = AppLanguage::text(helpMenu->addAction(QString()), AppLanguage::source("软件更新…"));
   action->setObjectName(QStringLiteral("nativeUpdateAction"));
   QObject::connect(action, &QAction::triggered, controller, [controller] { controller->showDialog(); });
+}
+void setNativeUpdateCloseAccepted(QWidget *window, bool accepted) {
+  if (!window) return;
+  const auto name = QStringLiteral("nativeUpdateController");
+  if (auto *controller = dynamic_cast<UpdateController *>(window->findChild<QObject *>(name, Qt::FindDirectChildrenOnly)))
+    controller->setCloseAccepted(accepted);
 }
 } // namespace gsw

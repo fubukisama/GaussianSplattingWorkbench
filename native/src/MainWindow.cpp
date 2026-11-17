@@ -1325,6 +1325,7 @@ bool MainWindow::openProjectFile(const QString &filePath) {
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {
+  setNativeUpdateCloseAccepted(this, false);
   if (mClosePending) {
     if (mProcessSupervisor.isRunning()) {
       event->ignore();
@@ -1345,6 +1346,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
               .arg(discardError));
     }
     mProcessSupervisor.shutdown();
+    setNativeUpdateCloseAccepted(this, true);
     event->accept();
     return;
   }
@@ -1366,6 +1368,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     // Do not discard its dataset/configuration/control files on observation close.
     mDiscardRecoveryOnDestruction = false;
     mProcessSupervisor.shutdown();
+    setNativeUpdateCloseAccepted(this, true);
     event->accept();
     return;
   }
@@ -1390,6 +1393,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
             .arg(discardError));
   }
   mProcessSupervisor.shutdown();
+  setNativeUpdateCloseAccepted(this, true);
   event->accept();
 }
 

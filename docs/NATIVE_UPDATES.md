@@ -14,7 +14,10 @@
 原有安装向导仍使用固定安装目录，无须套用此版本目录结构。
 
 下方托管发布命令不是运行中热更新，也不负责后台联网下载或定时拉取 Git。新增的
-“帮助 → 软件更新…”是独立联网前端：每日静默检查，自动下载及准备下次启动需主动开启。
+“帮助 → 软件更新…”是独立联网前端：启动约 10 秒后静默检查，此后每 4 小时检查。
+主动开启自动下载后，运行时只下载和验签，不切换版本；正常退出才复验并安装，
+下次从原来的入口启动新版。取消退出不会安装；尚未下载完成或校验失败则保留旧版。
+更新器不发起退出或重启，也不改变训练任务原有的退出保护。
 生产信任或可信引导组件尚未配置时会明确报错，不能当作“已是最新”；接入界面不等于
 已批准公开更新源、签名或引导迁移。发布者先确认对应提交的完整远端 CI、相关验收及
 包文件通过，再执行下方命令。局部验收或等待中的 CI 不能发布。
@@ -57,8 +60,12 @@ Ordinary updates do not replace the bootstrap. A bootstrap-protocol migration is
 The classic setup wizard retains its existing fixed-directory installation adapter.
 
 The managed publisher below is not live patching or a network downloader/Git poller. The
-new Help → Software Updates entry is a separate online front end: checks are silent and
-daily, while automatic download/next-launch preparation is opt-in. Missing production trust
+new Help → Software Updates entry is a separate online front end: it checks silently about
+10 seconds after startup and every four hours thereafter. Once opted in, the app downloads and
+verifies in the background without switching versions. It re-verifies and installs only on
+an accepted normal exit; the next launch uses the new version. A cancelled exit does not
+install, and an incomplete or rejected update keeps the old version. The updater never
+initiates a quit or restart or overrides the existing training exit guards. Missing production trust
 or a trusted bootstrap produces an explicit error, never an up-to-date claim. UI integration
 does not approve public feeds, signing or bootstrap migration. The publisher must first
 verify full remote CI, relevant acceptance and the exact-source package. Scoped or pending
@@ -106,8 +113,11 @@ protocol migration remains a separate verified deployment.
 従来のセットアップウィザードは固定インストール先を使用する方式のままです。
 
 下記の管理型発行コマンドはホットパッチやネットワークダウンローダー、Git の定期取得では
-ありません。新しい「ヘルプ → ソフトウェア更新…」は独立したオンライン UI です。確認は
-毎日サイレントに行い、自動ダウンロードと次回起動の準備は明示的な有効化が必要です。
+ありません。「ヘルプ → ソフトウェア更新…」は独立したオンライン UI です。起動から約 10 秒後と
+その後 4 時間ごとにバックグラウンドで確認します。自動ダウンロードを有効にすると、
+起動中はダウンロードと検証のみ行い、終了が確定した時点で再検証してインストールします。
+次回起動時に新版を使用します。終了を取り消した場合はインストールせず、未完了または検証失敗なら旧版を保持します。
+更新機能は終了や再起動を要求せず、学習タスクの既存の終了時保護を変更しません。
 本番の信頼設定や信頼できるブートストラップが未設定なら明確に失敗し、「最新版」とは
 表示しません。UI の接続は公開配信元・署名・ブートストラップ移行の承認ではありません。
 発行前に対応コミットの完全なリモート CI・関連受入検証・パッケージを確認します。

@@ -8,9 +8,14 @@ Its process fixture validates widgets/state/language behavior, not TLS or TUF;
 the separate native stable-entry/HTTPS tests validate those boundaries.
 
 The UI never raises or activates a window automatically. Background checks
-default to enabled and are throttled to once per day; automatic preparation is
-opt-in. Download/apply operate on the next launch pointer, not the current
-window or training process. Release notes use QPlainTextEdit, never remote HTML.
+default to enabled: the first check is about 10 seconds after startup, then
+every four hours. Automatic download and install on accepted normal exit are
+opt-in. Automatic preparation cannot install a slot or change the active pointer
+while the app is open. On normal quit, the independent helper re-verifies the
+prepared offer and bytes before changing the next-launch pointer. A refused
+close does not arm it. The explicit manual **Use on next launch** action is
+unchanged. No action restarts the app or sends commands to training. Release
+notes use QPlainTextEdit, never remote HTML.
 Language changes retranslate widgets and current state without restarting the
 helper. Preferences, skipped build IDs, channel and deferral use QSettings.
 
@@ -24,7 +29,9 @@ production trust or authorize bootstrap deployment.
 
 1. `native/src/MainWindow.cpp` includes `NativeUpdateUi.h`.
 2. Immediately after creating `helpMenu`, it calls
-   `installNativeUpdateUi(helpMenu, this);`.
+   `installNativeUpdateUi(helpMenu, this);`. The existing close handler only
+   arms the updater after its project and task guards allow closing. The helper
+   handles installation after the application's normal quit is committed.
 3. `src/NativeUpdateUi.cpp` and `src/NativeUpdateUi.h` are in the existing native
    application source list. They use the already-linked AppLanguage,
    NativeInstallation and Qt Widgets; the app does not link Rust/TUF itself.

@@ -6,6 +6,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QDialog>
 #include <QDateTime>
 #include <QDir>
@@ -18,6 +19,7 @@
 #include <QMainWindow>
 #include <QMenuBar>
 #include <QPointer>
+#include <QPushButton>
 #include <QSaveFile>
 #include <QSettings>
 #include <QTimer>
@@ -31,6 +33,19 @@
 #endif
 
 namespace {
+class FixtureWindow final : public QMainWindow {
+public:
+  bool allowClose = false;
+
+protected:
+  void closeEvent(QCloseEvent *event) override {
+    gsw::setNativeUpdateCloseAccepted(this, false);
+    if (!allowClose) { event->ignore(); return; }
+    QMainWindow::closeEvent(event);
+    gsw::setNativeUpdateCloseAccepted(this, event->isAccepted());
+  }
+};
+
 bool writeMarker(const QString &path, QJsonObject fields) {
   fields.insert("schema", "gsw.signed_automatic_ui_fixture/1");
   fields.insert("testOnly", true);
@@ -52,8 +67,10 @@ int main(int argc, char **argv) {
   if (!slot.cdUp() || slot.dirName() != QLatin1String("fixture-a")) return 65;
   const auto evidence = QDir(root).filePath("fixture-evidence");
   const auto marker = QDir(evidence).filePath("automatic-A.json");
+  const auto cancelClose = QDir(evidence).filePath("cancel-close-A");
   const auto release = QDir(evidence).filePath("release-A");
-  if (!QDir().mkpath(evidence) || QFileInfo::exists(marker) || QFileInfo::exists(release)) return 65;
+  if (!QDir().mkpath(evidence) || QFileInfo::exists(marker) ||
+      QFileInfo::exists(cancelClose) || QFileInfo::exists(release)) return 65;
 
   // A new private settings identity, not the user's application registry/settings.
   QCoreApplication::setOrganizationName("GSWSignedAutomaticFixture");
@@ -66,7 +83,7 @@ int main(int argc, char **argv) {
 
   QElapsedTimer clock;
   clock.start();
-  QMainWindow window;
+  FixtureWindow window;
   window.setAttribute(Qt::WA_ShowWithoutActivating);
   window.setWindowFlag(Qt::WindowDoesNotAcceptFocus);
   window.setWindowTitle("Isolated signed automatic-update fixture A");
@@ -78,16 +95,18 @@ int main(int argc, char **argv) {
 
   QPointer<QDialog> dialog;
   QPointer<QLabel> status;
-  bool armed = false, activated = false, foregroundUnchanged = true;
+  QPointer<QPushButton> apply;
+  bool armed = false, prepared = false, closeCancelled = false, foregroundUnchanged = true;
   QString failure, lastText;
   quintptr foreground = 0;
   const auto windowHandle = window.winId();
-  qint64 armedAt = -1, activatedAt = -1;
+  qint64 armedAt = -1, firstCheckAt = -1, preparedAt = -1;
   auto state = [&](const char *phase) {
     return QJsonObject{{"phase", QLatin1String(phase)}, {"label", "A"},
       {"buildId", "fixture-a"}, {"executable", app.applicationFilePath()},
       {"installationRoot", root}, {"elapsedMs", double(clock.elapsed())},
-      {"armedAtMs", double(armedAt)}, {"activatedAtMs", double(activatedAt)},
+      {"armedAtMs", double(armedAt)}, {"firstCheckAtMs", double(firstCheckAt)},
+      {"preparedAtMs", double(preparedAt)},
       {"statusText", lastText}, {"foregroundUnchanged", foregroundUnchanged},
       {"foregroundWindow", QString::number(quint64(foreground), 16)},
       {"automaticCheck", QSettings().value("updates/automaticCheck", true).toBool()},
@@ -110,13 +129,13 @@ int main(int argc, char **argv) {
     if (!dialog || !dialog->isVisible()) { fail("update_dialog_missing"); return; }
     QCheckBox *automatic = nullptr, *prepare = nullptr;
     const auto automaticText = QCoreApplication::translate("Workbench", "后台自动检查（不弹出窗口）");
-    const auto prepareText = QCoreApplication::translate("Workbench", "自动下载并在下次启动时使用，不中断当前任务");
     for (auto *checkbox : dialog->findChildren<QCheckBox *>()) {
       if (checkbox->text() == automaticText) automatic = checkbox;
-      if (checkbox->text() == prepareText) prepare = checkbox;
+      if (checkbox->objectName() == QLatin1String("nativeUpdateAutomaticPrepare")) prepare = checkbox;
     }
     status = dialog->findChild<QLabel *>("nativeUpdateStatus");
-    if (!automatic || !prepare || !status || !automatic->isChecked() || prepare->isChecked()) {
+    apply = dialog->findChild<QPushButton *>("nativeUpdateApply");
+    if (!automatic || !prepare || !status || !apply || !automatic->isChecked() || prepare->isChecked()) {
       fail("fresh_preferences_incorrect"); return;
     }
     // A real widget click opts in; no private Controller call or fake event.
@@ -146,36 +165,41 @@ int main(int argc, char **argv) {
     foregroundUnchanged = foregroundUnchanged && quintptr(GetForegroundWindow()) == foreground;
 #endif
     if (!foregroundUnchanged) { fail("background_flow_changed_foreground"); return; }
-    if (!dialog || dialog->isVisible() || !status) { fail("background_flow_opened_dialog"); return; }
+    if (!dialog || dialog->isVisible() || !status || !apply) { fail("background_flow_opened_dialog"); return; }
     if (!window.isVisible() || window.winId() != windowHandle) {
       fail("old_application_window_changed"); return;
     }
     lastText = status->text();
+    if (firstCheckAt < 0 && QSettings().value("updates/lastAttempt").toDateTime().isValid())
+      firstCheckAt = clock.elapsed();
     if (lastText.contains(QLatin1String("(download_tls_failed)"))) {
       fail("automatic_download_tls_failed"); return;
     }
-    const auto completed = QCoreApplication::translate("Workbench",
-        "下次启动时生效；当前窗口和任务将继续运行。");
-    if (!activated && lastText == completed) {
-      // Only an observation marker. The Python driver must independently
-      // launch signed B via the unchanged stable launcher before accepting.
-      activated = true;
-      activatedAt = clock.elapsed();
-      if (!QSettings().value("updates/lastAttempt").toDateTime().isValid() ||
-          !writeMarker(marker, state("activated"))) { fail("automatic_result_record_failed"); return; }
+    if (!prepared && apply->isEnabled() && QFileInfo::exists(QDir(root).filePath("updates/prepared.json"))) {
+      // Advisory only: the driver checks A's pointer and real B after quit.
+      prepared = true;
+      preparedAt = clock.elapsed();
+      if (firstCheckAt < 0 || !writeMarker(marker, state("prepared"))) {
+        fail("automatic_result_record_failed"); return;
+      }
+    }
+    if (prepared && !closeCancelled && QFileInfo::exists(cancelClose)) {
+      if (window.close() || !window.isVisible()) { fail("cancelled_close_closed_window"); return; }
+      closeCancelled = true;
+      if (!writeMarker(marker, state("close_cancelled"))) { fail("close_cancel_marker_failed"); return; }
     }
     if (QFileInfo::exists(release)) {
-      if (!activated) { fail("parent_released_before_activation"); return; }
-      window.close();
-      app.quit();
+      if (!prepared || !closeCancelled) { fail("parent_released_before_close_check"); return; }
+      window.allowClose = true;
+      if (!window.close()) fail("approved_close_was_rejected");
     }
   });
   poll.start();
-  // A dedicated integration fixture lifetime; product 30 s/24 h scheduling
-  // and the existing 100/150 ms A/B lifecycle fixtures are not changed.
+  // A dedicated integration fixture lifetime; this does not shorten any
+  // product timer or exercise an actual multi-hour wait.
   QTimer::singleShot(90000, &app, [&] { fail("automatic_flow_fixture_deadline"); });
   const int result = app.exec();
-  if (result == 0 && activated && failure.isEmpty()) {
+  if (result == 0 && prepared && closeCancelled && failure.isEmpty()) {
     if (!writeMarker(marker, state("normal_exit"))) return 3;
   }
   return result;

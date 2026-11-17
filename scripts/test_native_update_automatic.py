@@ -198,7 +198,7 @@ class AutomaticFlow(unittest.TestCase):
             time.sleep(.05)
         self.fail("actual automatic UI state not reached: " + json.dumps(observed))
 
-    def test_opted_in_production_controller_installs_signed_B_for_next_stable_launch(self):
+    def test_opted_in_signed_update_installs_only_on_accepted_close(self):
         prepared = json.loads(ARGS.preparation.read_text(encoding="utf-8-sig"))
         self.assertEqual(prepared.get("scope"), "production-ui-signed-automatic-fixture-only")
         self.assertIs(prepared.get("testOnly"), True)
@@ -265,7 +265,9 @@ class AutomaticFlow(unittest.TestCase):
         request_log = Path(json.loads(Path(prepared["serverInfo"]).read_text(
             encoding="utf-8"))["requestLog"])
         log_before = request_log.stat().st_size
-        marker, release = root / "fixture-evidence/automatic-A.json", root / "fixture-evidence/release-A"
+        marker = root / "fixture-evidence/automatic-A.json"
+        cancel_close = root / "fixture-evidence/cancel-close-A"
+        release = root / "fixture-evidence/release-A"
         environment = os.environ.copy()
         environment["QT_QPA_PLATFORM"] = "windows"
         for key in ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "QML2_IMPORT_PATH",
@@ -288,11 +290,28 @@ class AutomaticFlow(unittest.TestCase):
             self.assertIs(before.get("signalled"), False)
             self.assertEqual(Path(before["image"]).resolve(),
                 (root / "versions/fixture-a/bin/Gaussian Scene Workbench.exe").resolve())
-            activated = self.wait_marker(marker, "activated", 75)
-            self.assertIs(activated["foregroundUnchanged"], True)
-            self.assertEqual(activated["foregroundWindow"], armed["foregroundWindow"])
-            self.assertEqual(activated["applicationWindow"], armed["applicationWindow"])
-            self.assertEqual(activated["pid"], armed["pid"])
+            ready = self.wait_marker(marker, "prepared", 75)
+            self.assertGreaterEqual(ready["firstCheckAtMs"], 8000)
+            self.assertLess(ready["firstCheckAtMs"], 25000)
+            self.assertEqual(helper.active("fixture-a"), pointer_a)
+            self.assertFalse((root / "versions/fixture-b").exists())
+            cancel_close.write_bytes(b"test-owned-refused-close\n")
+            cancelled = self.wait_marker(marker, "close_cancelled", 5)
+            self.assertIs(cancelled["foregroundUnchanged"], True)
+            self.assertEqual(cancelled["foregroundWindow"], armed["foregroundWindow"])
+            self.assertEqual(cancelled["applicationWindow"], armed["applicationWindow"])
+            self.assertEqual(cancelled["pid"], armed["pid"])
+            self.assertEqual(helper.active("fixture-a"), pointer_a)
+            self.assertFalse((root / "versions/fixture-b").exists())
+            after = a_process.snapshot()
+            self.assertIs(after["signalled"], False)
+            self.assertEqual(after["processCreationTime"], before["processCreationTime"])
+            self.assertEqual(after["image"], before["image"])
+            release.write_bytes(b"owned-signed-automatic-fixture-release\n")
+            self.assertEqual(a_process.kernel.WaitForSingleObject(a_process.handle, 10000), 0)
+            self.assertEqual(a_process.snapshot()["exitCode"], 0)
+            final = self.wait_marker(marker, "normal_exit", 5)
+            self.assertIs(final["foregroundUnchanged"], True)
             pointer_b = helper.active("fixture-b")
             exe_b_sha256 = PREPARE.digest(root / "versions/fixture-b/bin/Gaussian Scene Workbench.exe")
             self.assertEqual(exe_b_sha256, prepared["fixtureBExecutableSha256"])
@@ -300,10 +319,6 @@ class AutomaticFlow(unittest.TestCase):
             # acceptance. The widget marker alone cannot grant an installation.
             b = helper.launch("B")
             self.assertNotEqual(b["pid"], armed["pid"])
-            after = a_process.snapshot()
-            self.assertIs(after["signalled"], False)
-            self.assertEqual(after["processCreationTime"], before["processCreationTime"])
-            self.assertEqual(after["image"], before["image"])
             self.assertEqual(helper.active("fixture-b"), pointer_b)
             for name, hashes in protected.items():
                 self.assertEqual(E2E.tree_hashes(root / name), hashes, name)
@@ -314,21 +329,17 @@ class AutomaticFlow(unittest.TestCase):
             self.assertTrue(any(row.get("path", "").startswith("/downloads/fixture-b-") for row in requests))
             self.assertTrue(all(not row.get("authorization_present") and not row.get("cookie_present")
                 for row in requests))
-            release.write_bytes(b"owned-signed-automatic-fixture-release\n")
-            self.assertEqual(a_process.kernel.WaitForSingleObject(a_process.handle, 10000), 0)
-            self.assertEqual(a_process.snapshot()["exitCode"], 0)
-            final = self.wait_marker(marker, "normal_exit", 5)
-            self.assertIs(final["foregroundUnchanged"], True)
             E2E.write_json(ARGS.evidence / "automatic-result.json", {
                 "schema": "gsw.signed_automatic_flow_evidence/1", "passed": True,
                 "testOnly": True, "production": False, "formalGswAcceptance": False,
-                "scope": "production-controller-signed-fixture-helper-next-stable-launch-only",
+                "scope": "production-controller-signed-fixture-install-on-normal-close",
                 "trustProduct": PRODUCT, "fixtureProfileSha256": fixture["profileSha256"],
                 "nativeHelperSha256": PREPARE.digest(native_helper),
                 "privateUiHelperAliasSameBytes": True, "originalFixtureHelperNameRetained": True,
-                "uiFixtureRootOverrideCompiled": False, "productScheduleChanged": False,
+                "uiFixtureRootOverrideCompiled": False, "productScheduleChanged": True,
                 "inheritedSdkPluginPathRemoved": "QT_PLUGIN_PATH" not in environment,
-                "armed": armed, "activated": activated, "oldWindowBirth": before["processCreationTime"],
+                "armed": armed, "prepared": ready, "cancelledClose": cancelled, "normalExit": final,
+                "oldWindowBirth": before["processCreationTime"],
                 "actualNextLaunchBuild": b["buildId"], "actualNextLaunchPid": b["pid"],
                 "releaseA": {"buildId": "fixture-a", "executableSha256": exe_a_sha256,
                              "archiveSha256": fixture["archives"]["A"]["archiveSha256"],
@@ -336,7 +347,7 @@ class AutomaticFlow(unittest.TestCase):
                 "releaseB": {"buildId": "fixture-b", "executableSha256": exe_b_sha256,
                              "archiveSha256": fixture["archives"]["B"]["archiveSha256"],
                              "activePointer": json.loads(pointer_b)},
-                "oldAStayedAlive": True, "bootstrapUnchanged": True, "userDataUnchanged": True,
+                "oldAStayedAliveUntilApprovedClose": True, "bootstrapUnchanged": True, "userDataUnchanged": True,
                 "originalSlotUnchanged": True, "sourceCommit": prepared["sourceCommit"],
                 "sourceTree": prepared["sourceTree"], "optimizerResume3DGS": "NOT_RUN",
                 "optimizerResume2DGS": "NOT_RUN", "steps": helper.steps})
@@ -345,6 +356,8 @@ class AutomaticFlow(unittest.TestCase):
                 launcher.kill()
                 launcher.wait(timeout=5)
             release.parent.mkdir(parents=True, exist_ok=True)
+            if not cancel_close.exists():
+                cancel_close.write_bytes(b"test-owned-refused-close\n")
             if not release.exists():
                 release.write_bytes(b"owned-signed-automatic-fixture-release\n")
             if a_process:

@@ -21,6 +21,15 @@ in the same change, with affected capabilities, limitations and verification or
 delivery status. Implementation, verification, publication and installation remain
 separate claims.
 
+## 2026-11-17
+
+- **Changed:** The [native updater](docs/NATIVE_UPDATES.md) checks silently about
+  10 seconds after startup, then every four hours. When automatic download is
+  enabled, verified updates install on an accepted normal exit, not while the
+  current build is in use. No forced restart or change to training exit guards.
+  The fixed launcher and signature checks are unchanged. This change does not
+  enable the public update feed.
+
 ## 2026-11-16
 
 - **Implemented:** [Fresh managed installation](docs/native_auto_update/FIRST_INSTALL.md)
