@@ -2083,6 +2083,13 @@ void MainWindow::createMenus() {
   });
   viewMenu->addAction(mTaskPreviewAction);
   viewMenu->addAction(mPausePreviewAction);
+  auto *lichtFeldPreview = AppLanguage::text(viewMenu->addAction(QString()),
+      AppLanguage::source("LichtFeld 训练预览投影（实验）"));
+  lichtFeldPreview->setObjectName(QStringLiteral("lichtFeldTrainingPreviewAction"));
+  lichtFeldPreview->setCheckable(true);
+  AppLanguage::bind(lichtFeldPreview, "toolTip", AppLanguage::source(
+      "仅在本次运行对兼容的 3DGS 训练画面采用 LichtFeld 投影。不改变训练、原场景、导出或 2DGS 表面元显示。"));
+  connect(lichtFeldPreview, &QAction::toggled, mViewport, &NativeViewport::setLichtFeldTrainingPreviewEnabled);
   viewMenu->addSeparator();
   viewMenu->addAction(mViewportGridSettingsAction);
   viewMenu->addAction(mViewportDetailsAction);

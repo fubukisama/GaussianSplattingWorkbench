@@ -266,6 +266,12 @@ GRAPHDECO 原声明、变更说明和完整 Apache-2.0 许可。仅适用于选�
 
 ## LichtFeld Studio Reference
 
+The separate [training-preview projection slice](native/third_party/lichtfeld-visualization/README.gsw.md)
+adapts portions of LichtFeld Studio's Apache-2.0 `utils.slang` at `3152c3f`.
+It retains the Google copyright and Apache license and records the exact
+changes. The experimental shader uses the existing Qt/OpenGL stack; no LS
+CUDA/Vulkan binaries or NVIDIA redistribution permissions are added.
+
 The native desktop now directly adapts LichtFeld Studio's whole-page byte-budget
 and at-least-one upload policy from `lod_page_cache.cpp`, pinned to
 `a8d2feafbe0abd91211e20f46b7793b8839b2922`, in

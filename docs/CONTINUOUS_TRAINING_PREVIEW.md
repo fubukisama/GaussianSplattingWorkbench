@@ -65,6 +65,11 @@ but the pre-training sparse publisher currently reads binary `points3D.bin`.
 
 ## Verification
 
+The optional [LichtFeld projection experiment](LICHTFELD_VISUALIZATION.md) changes
+only the active 3DGS viewport footprint in the opted-in session. It does not
+replace either producer, create an extra training job, or turn a preview into
+a checkpoint. 2DGS and validated Full Mip-Splatting keep their native paths.
+
 `--smoke-test-processing-preview` tests sparse → initial → updated → final handoffs,
 nonempty buffers during reads, coalescing, failed-file retention, camera continuity,
 read-only previews, cancellation and live zh_CN/en_US/ja_JP labels.

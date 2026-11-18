@@ -4,13 +4,16 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCoreApplication>
 #include <QDebug>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QWheelEvent>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <functional>
@@ -356,6 +359,143 @@ bool runTrainingIsolationSmokeTest(NativeViewport &viewport) {
   std::fprintf(stderr, "TRAINING_ISOLATION PASS: separate task/reference views, GPU surrender and cancellation retention\n");
   std::fflush(stderr);
   qInfo() << "TRAINING_ISOLATION PASS: separate task/reference views, GPU surrender and cancellation retention";
+  return true;
+}
+
+bool runLichtFeldPreviewSmokeTest(NativeViewport &viewport) {
+  QTemporaryDir directory;
+  const auto check = [](bool okay, const char *message) {
+    std::fprintf(stderr, "LichtFeld preview %s: %s\n", okay ? "PASS" : "FAIL", message);
+    std::fflush(stderr);
+    return okay;
+  };
+  if (!directory.isValid()) return false;
+  auto *action = viewport.window()->findChild<QAction *>(QStringLiteral("lichtFeldTrainingPreviewAction"));
+  if (!check(action && action->isCheckable() && !action->isChecked(),
+             "the real window exposes a default-off session preview choice")) return false;
+  const auto fixture = [&](const QString &name, bool surfel) -> QString {
+    QFile file(directory.filePath(name + QStringLiteral(".ply")));
+    QByteArray bytes = "ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\n"
+        "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\nproperty float opacity\n"
+        "property float scale_0\nproperty float scale_1\n";
+    if (!surfel) bytes += "property float scale_2\n";
+    bytes += "property float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float rot_3\nend_header\n";
+    bytes += surfel ? "0 0 0 2 -2 -2 6 4 4 1 0 0 0\n" : "0 0 0 2 -2 -2 6 4 4 4 1 0 0 0\n";
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size()) return {};
+    return file.fileName();
+  };
+  const QString gaussians = fixture(QStringLiteral("owned-3dgs-observation"), false);
+  const QString surfels = fixture(QStringLiteral("owned-2dgs-observation"), true);
+  const QString referencePath = fixture(QStringLiteral("owned-3dgs-reference"), false);
+  if (gaussians.isEmpty() || surfels.isEmpty() || referencePath.isEmpty()) return false;
+  const auto reference = [&] {
+    SceneObject model;
+    model.id = QStringLiteral("owned-reference-3dgs");
+    model.path = referencePath;
+    model.vertexCount = 1;
+    model.translation = {0.125F, -0.25F, 0.5F};
+    return model;
+  }();
+  // Only the disposable runner window is resized; the managed application and
+  // user fixtures are never used. The 340-device-pixel tail must be on screen.
+  viewport.window()->resize(1520, 920);
+  auto grid = viewport.viewportGridSettings();
+  grid.gridVisible = false;
+  grid.axesVisible = false;
+  if (!viewport.setViewportGridSettings(grid)) return false;
+  viewport.setShowObservationTrackball(false);
+  const auto frameReady = [&](const QString &path) {
+    return waitFor([&] {
+      viewport.grabFramebuffer();
+      return viewport.scenePath() == path && viewport.gaussianRenderingAvailable() &&
+          viewport.renderedPointCount() == 1;
+    });
+  };
+  const auto redExcess = [](const QImage &frame, int offset) {
+    const QPoint center(frame.width() / 2 + offset, frame.height() / 2);
+    if (!frame.rect().adjusted(5, 5, -5, -5).contains(center)) return -1000.0;
+    double sum = 0.0;
+    for (int y = center.y() - 5; y <= center.y() + 5; ++y)
+      for (int x = center.x() - 5; x <= center.x() + 5; ++x) {
+        const QRgb color = frame.pixel(x, y);
+        sum += qRed(color) - std::max(qGreen(color), qBlue(color));
+      }
+    return sum / 121.0;
+  };
+  const auto translated = [](const char *source) { return QCoreApplication::translate("Workbench", source); };
+  viewport.setSceneObjects({reference}, reference.id);
+  if (!check(frameReady(referencePath), "the reference Gaussian loads in the real native renderer")) return false;
+  viewport.beginProcessingPreview();
+  viewport.setProcessingStage(QStringLiteral("train"), 7, 80, 9);
+  viewport.setPreviewScene(gaussians, 1);
+  if (!check(frameReady(gaussians) && viewport.hasProcessingPreview(),
+             "the independent task buffer is ready")) return false;
+  viewport.resetCamera();
+  viewport.setRenderMode(NativeViewport::RenderMode::Gaussians);
+  const auto viewTarget = viewport.viewTarget();
+  const auto viewDistance = viewport.viewDistance();
+  const QImage legacy = viewport.grabFramebuffer();
+  action->trigger();
+  const QImage ported = viewport.grabFramebuffer();
+  const QString evidenceRoot = qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR");
+  if (!evidenceRoot.isEmpty()) {
+    const QDir evidence(evidenceRoot);
+    if (!(QDir().mkpath(evidenceRoot) &&
+          legacy.save(evidence.filePath(QStringLiteral("lichtfeld-legacy.png"))) &&
+          ported.save(evidence.filePath(QStringLiteral("lichtfeld-experimental.png"))))) return false;
+  }
+  const double oldCenter = redExcess(legacy, 0), newCenter = redExcess(ported, 0);
+  const double oldTail = redExcess(legacy, 340), newTail = redExcess(ported, 340);
+  std::fprintf(stderr, "LichtFeld preview device-pixel samples: size %dx%d, centre %.2f -> %.2f, tail %.2f -> %.2f\n",
+               ported.width(), ported.height(), oldCenter, newCenter, oldTail, newTail);
+  if (!check(action->isChecked() && legacy.size() == ported.size() &&
+                 oldCenter > 120 && std::abs(oldCenter - newCenter) <= 3 &&
+                 oldTail > 40 && newTail > 5 && oldTail - newTail >= 25 &&
+                 viewport.viewTarget() == viewTarget && viewport.viewDistance() == viewDistance,
+             "the same active 3DGS frame has a bounded opacity tail without moving its centre or camera")) return false;
+
+  const QString priorLanguage = AppLanguage::current();
+  QSet<QString> captions, explanations;
+  for (const auto &language : AppLanguage::supported()) {
+    if (!AppLanguage::apply(language, false)) return false;
+    captions.insert(action->text());
+    explanations.insert(viewport.processingPreviewDetail());
+    if (!check(action->isChecked() && viewport.scenePath() == gaussians &&
+                   viewport.viewTarget() == viewTarget && viewport.viewDistance() == viewDistance &&
+                   viewport.processingPreviewDetail().contains(translated("LichtFeld 投影（实验） · 周期快照")),
+               "the localized visible route is the actual file-observation renderer and keeps its view")) return false;
+  }
+  AppLanguage::apply(priorLanguage, false);
+  if (!check(captions.size() == 3 && explanations.size() == 3, "three different locales render immediately")) return false;
+
+  auto *pause = viewport.window()->findChild<QAction *>(QStringLiteral("pausePreviewAction"));
+  if (!pause || !pause->isEnabled()) return false;
+  pause->trigger();
+  viewport.setProcessingStage(QStringLiteral("train"), 8, 80, 10);
+  viewport.setPreviewScene(surfels, 1);
+  if (!check(viewport.processingPreviewPaused() && viewport.scenePath() == gaussians &&
+                 viewport.processingPreviewLabel().contains(QStringLiteral("8 / 80")),
+             "pausing the picture preserves the old observation while progress advances")) return false;
+  pause->trigger();
+  if (!check(frameReady(surfels) && viewport.sourceHasSurfelAttributes() && action->isChecked() &&
+                 viewport.processingPreviewDetail().contains(translated("原生 2DGS 表面元投影 · 周期快照")),
+             "resume uses the newest real two-scale snapshot and keeps the native surfel renderer")) return false;
+  const double surfelOn = redExcess(viewport.grabFramebuffer(), 0);
+  action->trigger();
+  const double surfelOff = redExcess(viewport.grabFramebuffer(), 0);
+  if (!check(surfelOn > 100 && std::abs(surfelOn - surfelOff) <= 2 && !action->isChecked(),
+             "switching the experiment on/off does not affect surfel pixels")) return false;
+  action->trigger();
+  viewport.finishProcessingPreview(false, true);
+  if (!check(frameReady(referencePath) && viewport.activeSceneId() == reference.id &&
+                 viewport.modelTranslation() == reference.translation && viewport.hasEditableScene(),
+             "cancellation restores the editable reference with its original ID and transform")) return false;
+  const double referenceOn = redExcess(viewport.grabFramebuffer(), 340);
+  action->trigger();
+  const double referenceOff = redExcess(viewport.grabFramebuffer(), 340);
+  if (!check(referenceOn > 20 && std::abs(referenceOn - referenceOff) <= 2,
+             "the experiment does not change the reference Gaussian renderer")) return false;
+  viewport.setSceneObjects({}, {});
   return true;
 }
 }

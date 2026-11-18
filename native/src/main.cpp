@@ -431,6 +431,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption trainingIsolationOption(QStringLiteral("smoke-test-training-isolation"),
       QStringLiteral("Verify new training previews preserve independent reference models."));
   parser.addOption(trainingIsolationOption);
+  QCommandLineOption lichtFeldPreviewOption(QStringLiteral("smoke-test-lichtfeld-preview"),
+      QStringLiteral("Verify the experimental LichtFeld footprint and unchanged native preview fallbacks."));
+  parser.addOption(lichtFeldPreviewOption);
   QCommandLineOption processingCompletionOption(QStringLiteral("smoke-test-processing-completion"),
       QStringLiteral("Verify completed model workflows restore inspect and editing tools."));
   parser.addOption(processingCompletionOption);
@@ -510,6 +513,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(spzSmokeOption) ||
                          parser.isSet(processingPreviewOption) ||
                          parser.isSet(trainingIsolationOption) ||
+                         parser.isSet(lichtFeldPreviewOption) ||
                          parser.isSet(processingCompletionOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(editNavigationOption) ||
@@ -784,6 +788,12 @@ int main(int argc, char *argv[]) {
     QTimer::singleShot(100, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runTrainingIsolationSmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(lichtFeldPreviewOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runLichtFeldPreviewSmokeTest(*viewport);
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(processingPreviewOption)) {

@@ -103,6 +103,7 @@ public:
   void setPreviewScene(const QString &path, qint64 count);
   void setProcessingPreviewVisible(bool visible);
   void setProcessingPreviewPaused(bool paused);
+  void setLichtFeldTrainingPreviewEnabled(bool enabled);
   [[nodiscard]] bool processingPreviewPaused() const { return mProcessingPreviewPaused; }
   [[nodiscard]] bool processingPreviewVisible() const { return mProcessingPreviewVisible; }
   [[nodiscard]] bool hasProcessingPreview() const { return mProcessingScene && mProcessingHasFrame; }
@@ -607,6 +608,11 @@ private:
   void drawMesh(const QMatrix4x4 &viewProjection);
   void drawTrainingPointCloud(const QMatrix4x4 &viewProjection);
   void drawGaussianCloud(const QMatrix4x4 &view, const QMatrix4x4 &projection);
+  enum class TrainingProjection { Native, Waiting, Surfel, FullMip, Unsupported, LichtFeld };
+  [[nodiscard]] TrainingProjection trainingProjection(const QMatrix4x4 &projection, bool ipc) const;
+  [[nodiscard]] QString trainingProjectionDetail() const;
+  [[nodiscard]] QOpenGLShaderProgram *lichtFeldTrainingProgram();
+  void releaseLichtFeldTrainingProgram();
   void drawInfiniteGrid(const QMatrix4x4 &viewProjection);
   void drawDepthAwareModelBounds(const QMatrix4x4 &modelViewProjection);
   void drawDepthAwareLines(const QVector<DepthOverlayVertex> &vertices,
@@ -817,6 +823,12 @@ private:
   QOpenGLShaderProgram *mPointProgram = nullptr;
   QOpenGLShaderProgram *mMeshProgram = nullptr;
   QOpenGLShaderProgram *mGaussianProgram = nullptr;
+  std::unique_ptr<QOpenGLShaderProgram> mLichtFeldTrainingProgram;
+  QByteArray mGaussianVertexBody;
+  QByteArray mGaussianFragmentSource;
+  QMetaObject::Connection mLichtFeldContextDestruction;
+  bool mLichtFeldTrainingPreviewEnabled = false;
+  bool mLichtFeldTrainingProgramFailed = false;
   QOpenGLShaderProgram *mGridProgram = nullptr;
   QOpenGLShaderProgram *mDepthOverlayProgram = nullptr;
   QOpenGLShaderProgram *mModelPickProgram = nullptr;

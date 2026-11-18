@@ -464,6 +464,7 @@ install(FILES third_party/sibr-fps-counter/LICENSE.md third_party/sibr-fps-count
   DESTINATION licenses/sibr-fps-counter)
 install(DIRECTORY third_party/blender-gizmo DESTINATION licenses)
 install(DIRECTORY third_party/lichtfeld-streaming DESTINATION licenses)
+install(DIRECTORY third_party/lichtfeld-visualization DESTINATION licenses)
 install(DIRECTORY third_party/blender-navigation DESTINATION licenses)
 install(DIRECTORY third_party/blender-grid DESTINATION licenses)
 install(FILES third_party/lucide/LICENSE third_party/lucide/README.gsw.md DESTINATION licenses/lucide)
@@ -1519,6 +1520,10 @@ if(BUILD_TESTING)
   endforeach()
   add_test(NAME native_processing_preview COMMAND GaussianSceneWorkbench --smoke-test-processing-preview)
   add_test(NAME native_training_isolation COMMAND GaussianSceneWorkbench --smoke-test-training-isolation)
+  add_test(NAME native_lichtfeld_preview COMMAND GaussianSceneWorkbench --smoke-test-lichtfeld-preview --theme dark)
+  set_tests_properties(native_lichtfeld_preview PROPERTIES TIMEOUT 60
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   set_tests_properties(native_training_isolation PROPERTIES TIMEOUT 60
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
@@ -2139,6 +2144,15 @@ if(BUILD_TESTING)
       target_compile_options(gsw_quality_mip_viewport_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME native_quality_mip_viewport COMMAND gsw_quality_mip_viewport_tests)
+    qt_add_executable(gsw_lichtfeld_footprint_tests tests/LichtFeldFootprintTests.cpp resources.qrc)
+    target_link_libraries(gsw_lichtfeld_footprint_tests PRIVATE Qt6::Core Qt6::Gui Qt6::OpenGL Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_lichtfeld_footprint_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME native_lichtfeld_footprint COMMAND gsw_lichtfeld_footprint_tests -o -,txt)
+    set_tests_properties(native_lichtfeld_footprint PROPERTIES TIMEOUT 30
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     set_tests_properties(native_quality_mip_viewport PROPERTIES TIMEOUT 60
       ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_QPA_PLATFORM=windows;GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/quality-mip-test-data"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")

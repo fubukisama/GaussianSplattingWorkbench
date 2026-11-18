@@ -1,0 +1,45 @@
+{
+  "schema": "gsw.source_port_ledger/1",
+  "upstreamRepository": "https://github.com/MrNeRF/LichtFeld-Studio",
+  "commit": "3152c3f4709a92873ceb5a674ff937817b1f9a4e",
+  "ports": [
+    {
+      "kind": "adapted_source",
+      "path": "native/third_party/lichtfeld-visualization/PreviewFootprint.glsl",
+      "upstreamPath": "src/rendering/rasterizer/vulkan/shader/src/slang/utils.slang",
+      "upstreamGitBlob": "9cc078c9bb7cd96cbddf00b9456863154719d96e",
+      "upstreamSha256": "362a11b993b8e7202e875b86bcec8533f2bc8a9747ee38c74719291f1e13d154",
+      "symbols": ["compute_jacobian_pinhole", "compute_jacobian_ortho", "clamp_covariance_2d_extent"],
+      "upstreamNotice": "Copyright 2024 Google LLC; Apache-2.0 file notice retained verbatim above the adapted implementation.",
+      "licenseFile": "LICENSE-APACHE-2.0.txt",
+      "modifications": "2026-11-18: adapted forward shader subset from Slang to GLSL 330. Accept already transformed OpenGL eye-space coordinates/covariance and a bottom-left pixel principal point. Keep the asymmetric ray clamp and opacity-dependent extent cap; use a cancellation-resistant eigen discriminant. GSW retains its own values and semantics for low-pass, cutoff, centre, blending and depth.",
+      "dependencies": ["GLSL 330 core on the existing Qt OpenGL context"],
+      "gswTarget": "GaussianSceneWorkbench (resources.qrc; NativeViewport::drawGaussianCloud only in the opted-in compatible live task path)",
+      "verification": ["native_lichtfeld_footprint", "native_lichtfeld_preview", "native_training_isolation"]
+    },
+    {
+      "kind": "reference_only",
+      "upstreamPath": "src/rendering/rasterizer/vulkan/shader/src/slang/config.slang",
+      "upstreamGitBlob": "e9c3dfed7d3641428c7f8b23987cd0b7cf8a9c31",
+      "upstreamSha256": "57de0c562e3bcd43fe16c6ef163d5a3026a7e29a159d7e818f37bb4e94a34db6",
+      "symbols": ["ALPHA_THRESHOLD", "MAX_POWER_THRESHOLD"],
+      "usage": "Only the numeric inputs to the extent formula are used. No include, shader module, or project build syntax copied."
+    },
+    {
+      "kind": "copied_upstream_notice",
+      "path": "native/third_party/lichtfeld-visualization/LICENSE-EXCEPTION.ls.txt",
+      "upstreamPath": "LICENSE-EXCEPTION.txt",
+      "upstreamGitBlob": "013a6e4ae53f30da11664137f0e3b8fa86c434b7",
+      "upstreamSha256": "fec56a9d350c39f943989c1601404a313b109f2fc32b2fec4fc755c1705f8d41",
+      "usage": "Provenance only. This port adds no NVIDIA libraries and does not claim or expand this exception."
+    },
+    {
+      "kind": "independent_gsw_adapter",
+      "path": "native/src/NativeViewport.cpp",
+      "symbols": ["trainingProjection", "lichtFeldTrainingProgram", "releaseLichtFeldTrainingProgram", "drawGaussianCloud"],
+      "usage": "Native selection and Qt OpenGL lifecycle. GSW's own preview transport, camera transform and rendering infrastructure are retained."
+    }
+  ],
+  "upstreamNoticeFileForSelectedShader": null,
+  "upstreamCudaOrVulkanRuntimeLinked": false
+}

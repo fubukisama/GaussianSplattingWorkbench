@@ -38,6 +38,7 @@
 #include <QJsonArray>
 #include <QLineF>
 #include <QMouseEvent>
+#include <QOpenGLContext>
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
@@ -596,6 +597,8 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
 }
 
 NativeViewport::~NativeViewport() {
+  disconnect(mLichtFeldContextDestruction);
+  releaseLichtFeldTrainingProgram();
   if (context() != nullptr && context()->isValid()) {
     makeCurrent();
     mTrainingGpuPreview.release();
@@ -1977,6 +1980,7 @@ QString NativeViewport::processingPreviewDetail() const {
     return QCoreApplication::translate("Workbench", mProcessingActive
         ? AppLanguage::source("预览已暂停 · 后台处理继续运行；恢复后显示最新画面")
         : AppLanguage::source("预览已暂停 · 恢复后显示最新可用画面"));
+  if (const QString projection = trainingProjectionDetail(); !projection.isEmpty()) return projection;
   if (mProcessingActive)
     return QCoreApplication::translate("Workbench", !mProcessingHasFrame
         ? AppLanguage::source("等待首个三维结果 · 保留当前画面")
@@ -2959,6 +2963,11 @@ qsizetype NativeViewport::cameraCount() const {
 void NativeViewport::initializeGL() {
   resetPresentationMetrics();
   initializeOpenGLFunctions();
+  disconnect(mLichtFeldContextDestruction);
+  mLichtFeldTrainingProgram.reset();
+  mLichtFeldTrainingProgramFailed = false;
+  mLichtFeldContextDestruction = connect(context(), &QOpenGLContext::aboutToBeDestroyed,
+      this, &NativeViewport::releaseLichtFeldTrainingProgram, Qt::DirectConnection);
   // Retain explicit diagnostic environment ceilings, but route them through
   // the same model-wide controller rather than independent per-cache pools.
   bool budgetOverrideValid = false;
@@ -3097,9 +3106,7 @@ void main() {
   QFile surfelSource(QStringLiteral(":/shaders/evaluate_surfel.glsl"));
   surfelSource.open(QIODevice::ReadOnly);
   const QByteArray surfelEvaluator = surfelSource.readAll();
-  const bool gaussianVertexCompiled =
-      mGaussianProgram->addShaderFromSourceCode(QOpenGLShader::Vertex,
-          QByteArray("#version 330 core\n") + shEvaluator + surfelEvaluator + qualityMipProjectionGlsl() + R"GLSL(
+  mGaussianVertexBody = shEvaluator + surfelEvaluator + qualityMipProjectionGlsl() + R"GLSL(
 layout(location = 0) in vec3 attributePosition;
 layout(location = 1) in vec3 attributeColor;
 layout(location = 2) in float attributeOpacity;
@@ -3236,6 +3243,12 @@ void main() {
   mat3 cameraCovariance =
       viewRotation * worldCovariance * transpose(viewRotation);
 
+#ifdef GSW_LICHTFELD_TRAINING_FOOTPRINT
+  vec3 rawCovariance = gswLichtFeldProjectCovariance(cameraCenter.xyz, cameraCovariance,
+      projection, viewportPixels, shOrthographic);
+  vec3 filteredCovariance = gswApplyGaussian2dFilter(rawCovariance, vertexOpacity, fullMipFilter);
+  filteredCovariance = gswLichtFeldClampFootprint(filteredCovariance, vertexOpacity);
+#else
   float depth = -cameraCenter.z;
   float focalX = 0.5 * viewportPixels.x * projection[0][0];
   float focalY = 0.5 * viewportPixels.y * projection[1][1];
@@ -3256,6 +3269,7 @@ void main() {
       dot(jacobianX, cameraCovariance * jacobianX),
       dot(jacobianX, cameraCovariance * jacobianY),
       dot(jacobianY, cameraCovariance * jacobianY)), vertexOpacity, fullMipFilter);
+#endif
   float covarianceXX = filteredCovariance.x;
   float covarianceXY = filteredCovariance.y;
   float covarianceYY = filteredCovariance.z;
@@ -3287,10 +3301,8 @@ void main() {
   gl_Position = clipCenter;
   gl_Position.xy += ndcOffset * clipCenter.w;
 }
-)GLSL");
-  const bool gaussianFragmentCompiled =
-      mGaussianProgram->addShaderFromSourceCode(QOpenGLShader::Fragment,
-          QByteArray("#version 330 core\n") + surfelEvaluator + R"GLSL(
+)GLSL";
+  mGaussianFragmentSource = QByteArray("#version 330 core\n") + surfelEvaluator + R"GLSL(
 in vec3 vertexColor;
 in float vertexOpacity;
 in vec2 gaussianCoordinate;
@@ -3324,7 +3336,11 @@ void main() {
                           selected * 0.16);
   fragmentColor = vec4(displayColor * alpha, alpha);
 }
-)GLSL");
+)GLSL";
+  const bool gaussianVertexCompiled = mGaussianProgram->addShaderFromSourceCode(
+      QOpenGLShader::Vertex, QByteArray("#version 330 core\n") + mGaussianVertexBody);
+  const bool gaussianFragmentCompiled = mGaussianProgram->addShaderFromSourceCode(
+      QOpenGLShader::Fragment, mGaussianFragmentSource);
   mGaussianShaderReady = pointShaderReady && gaussianVertexCompiled &&
                          gaussianFragmentCompiled && mGaussianProgram->link();
   if (!mGaussianShaderReady && mScene->mSceneLoadMessage.isEmpty()) {
@@ -6212,6 +6228,100 @@ void NativeViewport::setMaximumShDegree(int degree) {
   update(); // uniforms only: no worker reset, vertex rebuild, or SH upload
 }
 
+void NativeViewport::setLichtFeldTrainingPreviewEnabled(bool enabled) {
+  if (mLichtFeldTrainingPreviewEnabled == enabled) return;
+  mLichtFeldTrainingPreviewEnabled = enabled;
+  // This choice is process-local and never reaches the optimizer or a model.
+  update();
+  emit viewportPresentationChanged();
+}
+
+NativeViewport::TrainingProjection NativeViewport::trainingProjection(
+    const QMatrix4x4 &projection, bool ipc) const {
+  if (!mLichtFeldTrainingPreviewEnabled || !mProcessingActive ||
+      mProcessingStage != QStringLiteral("train") || !mProcessingPreviewVisible ||
+      mScene != mProcessingScene || mProcessingPreviewPaused || mRenderingInactiveScene ||
+      mCapturingProcessingReferenceImage) return TrainingProjection::Native;
+  if (mScene->mRenderMode != RenderMode::Gaussians ||
+      (!ipc && (!mScene->mHasGaussianAttributes || mScene->mRenderedPointCount <= 0)))
+    return TrainingProjection::Waiting;
+  if (!ipc && mScene->mHasSurfelAttributes) return TrainingProjection::Surfel;
+  if (mScene->mQualityMip.enabled) return TrainingProjection::FullMip;
+  // Only an axis-aligned pinhole or orthographic projection is in this port's
+  // contract. In particular, keep the native path for calibrated skew rather
+  // than silently substituting a diagonal K. Off-centre cx/cy are supported.
+  const bool projectiveRow = projection(3, 0) == 0.F && projection(3, 1) == 0.F &&
+      (mOrthographic ? projection(3, 2) == 0.F && projection(3, 3) == 1.F
+                     : projection(3, 2) == -1.F && projection(3, 3) == 0.F &&
+                           projection(0, 3) == 0.F && projection(1, 3) == 0.F);
+  if (!projectiveRow || projection(0, 1) != 0.F || projection(1, 0) != 0.F ||
+      !std::isfinite(projection(0, 0)) || projection(0, 0) <= 0.F ||
+      !std::isfinite(projection(1, 1)) || projection(1, 1) <= 0.F ||
+      !std::isfinite(projection(0, 2)) || !std::isfinite(projection(1, 2)) ||
+      (mOrthographic && (projection(0, 2) != 0.F || projection(1, 2) != 0.F)))
+    return TrainingProjection::Unsupported;
+  return TrainingProjection::LichtFeld;
+}
+
+QString NativeViewport::trainingProjectionDetail() const {
+  if (!mLichtFeldTrainingPreviewEnabled) return {};
+  const bool ipc = trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame();
+  switch (trainingProjection(projectionMatrix(), ipc)) {
+    case TrainingProjection::Native: return {};
+    case TrainingProjection::Surfel:
+      return QCoreApplication::translate("Workbench", "原生 2DGS 表面元投影 · 周期快照");
+    case TrainingProjection::FullMip:
+      return QCoreApplication::translate("Workbench", "保留原生 Full Mip-Splatting 预览");
+    case TrainingProjection::Unsupported:
+      return QCoreApplication::translate("Workbench", "此相机投影不支持实验路径 · 使用原生预览");
+    case TrainingProjection::LichtFeld:
+      if (mLichtFeldTrainingProgramFailed)
+        return QCoreApplication::translate("Workbench", "LichtFeld 着色器不可用 · 使用原生预览");
+      if (mLichtFeldTrainingProgram)
+        return QCoreApplication::translate("Workbench", ipc
+            ? AppLanguage::source("LichtFeld 投影（实验） · GPU 共享预览")
+            : AppLanguage::source("LichtFeld 投影（实验） · 周期快照"));
+      [[fallthrough]];
+    case TrainingProjection::Waiting:
+      return QCoreApplication::translate("Workbench", "等待兼容的 3DGS 高斯训练画面");
+  }
+  return {};
+}
+
+QOpenGLShaderProgram *NativeViewport::lichtFeldTrainingProgram() {
+  // Called on the viewport's GL thread and only after an explicit opt-in. A
+  // missing or rejected experimental shader cannot invalidate the legacy one.
+  if (mLichtFeldTrainingProgramFailed) return nullptr;
+  if (mLichtFeldTrainingProgram) return mLichtFeldTrainingProgram.get();
+  QFile source(QStringLiteral(":/shaders/lichtfeld_preview_footprint.glsl"));
+  auto candidate = std::make_unique<QOpenGLShaderProgram>();
+  if (!source.open(QIODevice::ReadOnly) ||
+      !candidate->addShaderFromSourceCode(QOpenGLShader::Vertex,
+          QByteArray("#version 330 core\n#define GSW_LICHTFELD_TRAINING_FOOTPRINT\n") +
+          source.readAll() + '\n' + mGaussianVertexBody) ||
+      !candidate->addShaderFromSourceCode(QOpenGLShader::Fragment, mGaussianFragmentSource) ||
+      !candidate->link()) {
+    mLichtFeldTrainingProgramFailed = true;
+    qWarning() << "LichtFeld training projection shader unavailable:" << candidate->log().left(2048);
+    return nullptr;
+  }
+  mLichtFeldTrainingProgram = std::move(candidate);
+  return mLichtFeldTrainingProgram.get();
+}
+
+void NativeViewport::releaseLichtFeldTrainingProgram() {
+  if (!mLichtFeldTrainingProgram) return;
+  auto *previous = QOpenGLContext::currentContext();
+  auto *previousSurface = previous ? previous->surface() : nullptr;
+  auto *owner = context();
+  if (owner && owner->isValid() && previous != owner) makeCurrent();
+  mLichtFeldTrainingProgram.reset();
+  if (owner && previous != owner && QOpenGLContext::currentContext() == owner) {
+    doneCurrent();
+    if (previous && previous->isValid() && previousSurface) previous->makeCurrent(previousSurface);
+  }
+}
+
 void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
                                        const QMatrix4x4 &projection) {
   // File-based live previews use the same validated per-snapshot attributes as
@@ -6224,6 +6334,18 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
     return;
   }
 
+  QOpenGLShaderProgram *program = mGaussianProgram;
+  if (trainingProjection(projection, ipcPreview) == TrainingProjection::LichtFeld) {
+    if (auto *candidate = lichtFeldTrainingProgram()) program = candidate;
+  }
+  if (!program->bind()) {
+    if (program == mGaussianProgram) return;
+    mLichtFeldTrainingProgramFailed = true;
+    mLichtFeldTrainingProgram.reset();
+    program = mGaussianProgram;
+    if (!program->bind()) return;
+  }
+  const bool lichtFeld = program != mGaussianProgram;
   const qreal ratio = devicePixelRatioF();
   // Keep sorted Gaussian blending, but respect depth already written by the
   // physical reference axes and opaque models. Gaussian fragments still do
@@ -6232,48 +6354,47 @@ void NativeViewport::drawGaussianCloud(const QMatrix4x4 &view,
   glDepthMask(GL_FALSE);
   glEnable(GL_BLEND);
   glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-  mGaussianProgram->bind();
   const bool indexed = !ipcPreview && mScene->indexedGaussians;
-  mGaussianProgram->setUniformValue("indexedAttributes", indexed);
-  mGaussianProgram->setUniformValue("surfelRendering", !ipcPreview && mScene->mHasSurfelAttributes);
-  mGaussianProgram->setUniformValue("fullMipFilter",
+  program->setUniformValue("indexedAttributes", indexed);
+  program->setUniformValue("surfelRendering", !ipcPreview && mScene->mHasSurfelAttributes);
+  program->setUniformValue("fullMipFilter",
       mScene->mQualityMip.appliesToRasterFrame(ipcPreview, mScene->mHasSurfelAttributes));
-  mGaussianProgram->setUniformValue("gaussianAttributes", 2);
-  mGaussianProgram->setUniformValue("gaussianOrder", 3);
-  mGaussianProgram->setUniformValue("gaussianSh", 4);
-  mGaussianProgram->setUniformValue("shDegree", effectiveShDegree());
-  mGaussianProgram->setUniformValue("shCoefficientCount", mScene->gaussianGpu.shCoefficientCount());
+  program->setUniformValue("gaussianAttributes", 2);
+  program->setUniformValue("gaussianOrder", 3);
+  program->setUniformValue("gaussianSh", 4);
+  program->setUniformValue("shDegree", effectiveShDegree());
+  program->setUniformValue("shCoefficientCount", mScene->gaussianGpu.shCoefficientCount());
   const QMatrix4x4 inverseView = view.inverted();
-  mGaussianProgram->setUniformValue("shCameraPosition", inverseView.map(QVector3D()));
-  mGaussianProgram->setUniformValue("shParallelDirection", inverseView.mapVector(QVector3D(0, 0, -1)).normalized());
-  mGaussianProgram->setUniformValue("shOrthographic", mOrthographic);
-  mGaussianProgram->setUniformValue("view", view);
-  mGaussianProgram->setUniformValue("selected",
+  program->setUniformValue("shCameraPosition", inverseView.map(QVector3D()));
+  program->setUniformValue("shParallelDirection", inverseView.mapVector(QVector3D(0, 0, -1)).normalized());
+  program->setUniformValue("shOrthographic", mOrthographic);
+  program->setUniformValue("view", view);
+  program->setUniformValue("selected",
                                     mModelSelected ? 1.0F : 0.0F);
-  mGaussianProgram->setUniformValue("projection", projection);
-  mGaussianProgram->setUniformValue(
+  program->setUniformValue("projection", projection);
+  program->setUniformValue(
       "viewportPixels", QVector2D(static_cast<float>(width() * ratio),
                                   static_cast<float>(height() * ratio)));
   if (ipcPreview) {
     glBindVertexArray(mTrainingGpuPreview.activeVertexArray());
-    noteRenderDiagnosticDraw("draw-ipc-gaussians", drawCount);
+    noteRenderDiagnosticDraw(lichtFeld ? "draw-lichtfeld-ipc-gaussians" : "draw-ipc-gaussians", drawCount);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
                           static_cast<GLsizei>(drawCount));
     glBindVertexArray(0);
   } else if (indexed) {
     mScene->gaussianGpu.bind();
-    noteRenderDiagnosticDraw("draw-indexed-gaussians", drawCount);
+    noteRenderDiagnosticDraw(lichtFeld ? "draw-lichtfeld-indexed-gaussians" : "draw-indexed-gaussians", drawCount);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(drawCount));
     mScene->gaussianGpu.unbind();
   } else {
     mScene->gaussianGpu.bindTextures();
     QOpenGLVertexArrayObject::Binder vertexArrayBinder(&mScene->mGaussianVertexArray);
-    noteRenderDiagnosticDraw("draw-compatibility-gaussians", drawCount);
+    noteRenderDiagnosticDraw(lichtFeld ? "draw-lichtfeld-compatibility-gaussians" : "draw-compatibility-gaussians", drawCount);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
                           static_cast<GLsizei>(drawCount));
     mScene->gaussianGpu.unbindTextures();
   }
-  mGaussianProgram->release();
+  program->release();
   glDisable(GL_BLEND);
   glDepthMask(GL_TRUE);
   glEnable(GL_DEPTH_TEST);

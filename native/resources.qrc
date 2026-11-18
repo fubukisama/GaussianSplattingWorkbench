@@ -2,6 +2,7 @@
   <qresource prefix="/shaders">
     <file alias="evaluate_sh.glsl">third_party/gsplat-sh/evaluate_sh.glsl</file>
     <file alias="evaluate_surfel.glsl">src/shaders/SurfelProjection.glsl</file>
+    <file alias="lichtfeld_preview_footprint.glsl">third_party/lichtfeld-visualization/PreviewFootprint.glsl</file>
   </qresource>
   <qresource prefix="/icons">
     <file alias="gsw-app-icon.png">assets/gsw-app-icon.png</file>
