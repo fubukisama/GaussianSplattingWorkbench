@@ -118,6 +118,7 @@ $StaticFiles = @(
   @{ Source = "native\worker\import_preflight.py"; Destination = "native\worker\import_preflight.py" },
   @{ Source = "native\worker\training_preflight.py"; Destination = "native\worker\training_preflight.py" },
   @{ Source = "native\worker\gpu_preview_publisher.py"; Destination = "native\worker\gpu_preview_publisher.py" },
+  @{ Source = "native\worker\training_observation.py"; Destination = "native\worker\training_observation.py" },
   @{ Source = "native\worker\training_preview.py"; Destination = "native\worker\training_preview.py" },
   @{ Source = "native\worker\training_preview_policy.py"; Destination = "native\worker\training_preview_policy.py" },
   @{ Source = "native\worker\training_reconstruction_summary.py"; Destination = "native\worker\training_reconstruction_summary.py" },

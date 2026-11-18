@@ -278,6 +278,22 @@ jobs:
           & $env:QA_PYTHON -I -B scripts/verify_native_backend.py --root .
           if ($LASTEXITCODE -ne 0) { throw "Native source boundary verification failed." }
 
+      - name: Verify isolated staged backend import before native build
+        shell: pwsh
+        env:
+          QA_PYTHON: ${{ steps.qa-python.outputs.python-path }}
+          CUDA_VISIBLE_DEVICES: '-1'
+        run: |
+          $probeRoot = Join-Path $env:RUNNER_TEMP 'gsw-native-backend-import-preflight'
+          ./scripts/stage_native_backend.ps1 -SourceRoot $PWD -DestinationRoot $probeRoot -PythonExecutable $env:QA_PYTHON
+          Push-Location -LiteralPath $probeRoot
+          try {
+            & $env:QA_PYTHON -I -B (Join-Path $probeRoot 'native/worker/import_preflight.py') --backend-root $probeRoot
+            if ($LASTEXITCODE -ne 0) { throw 'Staged backend import preflight failed before native build.' }
+          } finally {
+            Pop-Location
+          }
+
       # Fail fast on CPU/backend regressions before the ordinary C++ build.
       # This is the same complete worker suite, not a filtered replacement.
       - name: Test native worker

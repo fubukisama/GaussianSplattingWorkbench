@@ -51,6 +51,7 @@ BACKEND_FILES = (
     "native/worker/reconstruction_comparison.py",
     "native/worker/canonical_training.py",
     "native/worker/camera_rasterizer_runtime.py",
+    "native/worker/training_observation.py",
     "native/worker/training_configuration.py",
     "native/worker/training_failure.py",
     "native/worker/training_job_connection.py",
