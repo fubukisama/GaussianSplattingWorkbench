@@ -12,10 +12,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from native.worker.training_preview_policy import TrainingPreviewPolicy
+from native.worker.training_observation import ROW_FLOATS, stream_identity
 
 
 class TrainingPreviewPublisher:
-    def __init__(self, output, emit, interval=3.0, max_points=500_000, policy=None):
+    def __init__(self, output, emit, interval=3.0, max_points=500_000, policy=None, *,
+                 control=None, training_identity=None, camera_contract=None):
         self.directory = Path(output) / ".gsw" / "previews" / uuid.uuid4().hex
         self.emit = emit
         self.interval = max(0.1, float(interval))
@@ -26,6 +28,7 @@ class TrainingPreviewPublisher:
         self.sequence = 0
         self.paths = []
         self.policy = policy or TrainingPreviewPolicy(emit=emit)
+        self.observation_stream = stream_identity(control, training_identity, camera_contract)
 
     def due(self, interval=None):
         interval = self.interval if interval is None else interval
@@ -61,6 +64,8 @@ class TrainingPreviewPublisher:
         rows = np.asarray(rows, dtype="<f4")
         if rows.ndim != 2 or rows.shape[1] not in (13, 14) or rows.shape[0] == 0:
             return False
+        if self.observation_stream and rows.shape[1] != ROW_FLOATS[self.observation_stream["backend"]]:
+            return False
         source_count = int(source_count if source_count is not None else len(rows))
         stride = max(1, (len(rows) + self.max_points - 1) // self.max_points)
         rows = rows[::stride].copy(order="C")
@@ -89,19 +94,28 @@ class TrainingPreviewPublisher:
                 header += 'comment GSW_QUALITY_REQUIRES_SIDECAR full_mip_fused_v1\n'
             header += f"element vertex {len(rows)}\n"
             header += "".join(f"property float {name}\n" for name in properties) + "end_header\n"
+            header_bytes, body = header.encode("ascii"), rows.tobytes()
             with temporary.open("wb") as stream:
-                stream.write(header.encode("ascii"))
-                stream.write(rows.tobytes())
+                stream.write(header_bytes)
+                stream.write(body)
             os.replace(temporary, path)
             if quality_metadata is not None:
                 from native.worker.training_checkpoint import atomic_json, file_digest
                 quality_metadata['fused_sha256'] = file_digest(path)
                 atomic_json(path.with_suffix('.quality.json'), quality_metadata)
-            self.emit("[gsw-training-preview]", {
+            event = {
                 "iteration": iteration, "point_cloud_path": str(path.resolve()),
                 "preview_kind": "gaussian_initial" if initial else "gaussian_live",
                 "gaussian_count": source_count, "preview_count": len(rows),
-            })
+            }
+            if self.observation_stream:
+                digest = hashlib.sha256(header_bytes)
+                digest.update(body)
+                event["observation"] = dict(self.observation_stream, transport="atomic_ply",
+                    generation=self.sequence, iteration=iteration, sourceCount=source_count,
+                    previewCount=len(rows), rowFloats=rows.shape[1], sha256=digest.hexdigest(),
+                    producerMonotonicNs=str(int(self.last_time * 1_000_000_000)))
+            self.emit("[gsw-training-preview]", event)
             self.paths.append(path)
             while len(self.paths) > 4:
                 obsolete = self.paths.pop(0)

@@ -249,6 +249,7 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ProcessingPreviewSmokeTest.cpp
   src/ProcessingPreviewSmokeTest.h
   src/TrainingIsolationSmokeTest.cpp
+  src/LiveTrainingSmokeTest.cpp
   src/TrainingIsolationSmokeTest.h
   src/ImportEnvironmentProbe.cpp
   src/ImportEnvironmentProbe.h
@@ -1004,7 +1005,7 @@ if(BUILD_TESTING)
     native.worker.test_training_configuration native.worker.test_runtime_checkpoint_binding
     native.worker.test_runtime_worker_configuration native.worker.test_training_failure
     native.worker.test_runtime_delivery
-    native.worker.test_training_job_connection native.worker.test_two_dgs_adapter
+    native.worker.test_training_job_connection native.worker.test_two_dgs_adapter native.worker.test_training_observation
     native.backend.tests.test_training_backends.TrainingBackendTests.test_two_dgs_vram_warning_reports_selected_guard_and_density_schedule)
   set_tests_properties(native_runtime_decoupling_contracts PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." TIMEOUT 120

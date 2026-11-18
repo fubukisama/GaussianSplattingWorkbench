@@ -100,7 +100,7 @@ public:
                           int progress = -1);
   void finishProcessingPreview(bool succeeded, bool cancelled, bool paused = false);
   void clearProcessingPreview();
-  void setPreviewScene(const QString &path, qint64 count);
+  void setPreviewScene(const QString &path, qint64 count, const ObservationFileIntegrity &integrity = {});
   void setProcessingPreviewVisible(bool visible);
   void setProcessingPreviewPaused(bool paused);
   void setLichtFeldTrainingPreviewEnabled(bool enabled);
@@ -349,6 +349,7 @@ protected:
   void keyReleaseEvent(QKeyEvent *event) override;
 
 private:
+  friend bool runLiveTrainingSmokeTest(NativeViewport &viewport, const QString &configPath);
   [[nodiscard]] QVector<QVector3D> displayedBoundsCorners() const;
   [[nodiscard]] QVector<QVector3D> selectionBoundsCorners() const;
   [[nodiscard]] QVector3D selectionPivot() const;
@@ -439,6 +440,8 @@ private:
     bool previewLoadBusy = false;
     bool previewLoadFailed = false;
     QString queuedPreviewPath;
+    ObservationFileIntegrity queuedPreviewIntegrity;
+    ObservationFileIntegrity requestedPreviewIntegrity;
     qint64 queuedPreviewCount = 0;
     qint64 requestedPreviewCount = 0;
     int mCameraTrajectoryGeneration = 0;
@@ -571,7 +574,7 @@ private:
   void startSceneLoad(const QString &scenePath, bool continuous = false,
                       bool preserveView = false, bool forcePaged = false,
                       std::shared_ptr<ResourceReservation> reservation = {});
-  void loadContinuousScene(const QString &path, qint64 count);
+  void loadContinuousScene(const QString &path, qint64 count, const ObservationFileIntegrity &integrity = {});
   [[nodiscard]] QMatrix4x4 trainingPreviewCoordinateTransform() const;
   void startSelection(const ScreenSelectionRequest &request,
                       SelectionOperation operation);
@@ -697,6 +700,7 @@ private:
   bool mProcessingPreviewResumePending = false;
   QString mPausedPreviewCandidatePath;
   qint64 mPausedPreviewCandidateCount = 0;
+  ObservationFileIntegrity mPausedPreviewCandidateIntegrity;
   std::optional<TrainingGpuPreviewDescriptor> mLatestTrainingGpuPreviewDescriptor;
   [[nodiscard]] QList<std::shared_ptr<SceneState>> displayedSceneStates() const;
   [[nodiscard]] bool trainingGpuPreviewForScene() const;

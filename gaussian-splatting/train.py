@@ -188,11 +188,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             from native.worker.training_preview import TrainingPreviewPublisher
             from native.worker.training_preview_policy import TrainingPreviewPolicy, close_preview_safely
             preview_policy = TrainingPreviewPolicy(memory_probe=torch.cuda.mem_get_info, emit=emit_gsw_event)
-            file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event, policy=preview_policy)
+            file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event, policy=preview_policy,
+                control=native_control, training_identity=native_identity,
+                camera_contract=getattr(dataset, "_gsw_camera_contract", None))
             file_preview.publish_gaussians(quality_controller.preview_model() if quality_controller else gaussians,
                                            first_iter, initial=True)
             from native.worker.gpu_preview_publisher import create_publisher, emit_descriptor
-            gpu_preview_emit = emit_descriptor
+            observation_stream = file_preview.observation_stream
+            def gpu_preview_emit(descriptor):
+                emit_descriptor(dict(descriptor, observationStream=observation_stream)
+                                if observation_stream else descriptor)
             if quality_controller is not None and quality_controller.mip is not None:
                 # The IPC protocol has no per-model 2D filtering contract.
                 # Use explicit fused+sidecar snapshots instead of misrendering.

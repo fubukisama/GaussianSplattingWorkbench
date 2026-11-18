@@ -6306,6 +6306,11 @@
     "en_US": "Unable to open PLY file %1: %2",
     "ja_JP": "PLY ファイル %1 を開けません: %2"
   },
+  "Training preview snapshot failed integrity verification.": {
+    "zh_CN": "训练预览快照未通过完整性检查。",
+    "en_US": "Training preview snapshot failed integrity verification.",
+    "ja_JP": "学習プレビューのスナップショットが整合性検証に失敗しました。"
+  },
   "The PLY file does not contain any vertices.": {
     "zh_CN": "PLY 文件中没有顶点。",
     "en_US": "The PLY file does not contain any vertices.",

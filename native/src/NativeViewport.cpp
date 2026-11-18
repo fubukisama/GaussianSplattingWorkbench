@@ -1865,6 +1865,8 @@ void NativeViewport::setProcessingPreviewPaused(const bool paused) {
       if (QFileInfo(candidate).isFile()) {
         mPausedPreviewCandidatePath = candidate;
         mPausedPreviewCandidateCount = candidateCount;
+        mPausedPreviewCandidateIntegrity = scene->queuedPreviewPath.isEmpty()
+            ? scene->requestedPreviewIntegrity : scene->queuedPreviewIntegrity;
       }
       ++scene->mSceneGeneration;
       scene->mRequestedScenePath = scene->mScenePath;
@@ -1916,9 +1918,10 @@ void NativeViewport::setProcessingPreviewPaused(const bool paused) {
     }
     const QString candidate = mPausedPreviewCandidatePath;
     const qint64 candidateCount = mPausedPreviewCandidateCount;
+    const auto integrity = mPausedPreviewCandidateIntegrity;
     mPausedPreviewCandidatePath.clear();
     mPausedPreviewCandidateCount = 0;
-    if (QFileInfo(candidate).isFile()) setPreviewScene(candidate, candidateCount);
+    if (QFileInfo(candidate).isFile()) setPreviewScene(candidate, candidateCount, integrity);
     else if (!mLatestTrainingGpuPreviewDescriptor && !mProcessingScene->mScenePath.isEmpty()) {
       mProcessingPreviewResumePending = false;
       mProcessingPausedImage = {};
@@ -1996,7 +1999,7 @@ QString NativeViewport::processingPreviewDetail() const {
   return QCoreApplication::translate("Workbench", "只读预览 · 可自由观察，不修改源数据");
 }
 
-void NativeViewport::setPreviewScene(const QString &path, qint64 count) {
+void NativeViewport::setPreviewScene(const QString &path, qint64 count, const ObservationFileIntegrity &integrity) {
   if (!mProcessingScene) return;
   if (mProcessingPreviewPaused) {
     // Snapshot retention may remove older files. Do not let an expired path
@@ -2004,6 +2007,7 @@ void NativeViewport::setPreviewScene(const QString &path, qint64 count) {
     if (QFileInfo(path).isFile()) {
       mPausedPreviewCandidatePath = path;
       mPausedPreviewCandidateCount = count;
+      mPausedPreviewCandidateIntegrity = integrity;
     }
     return;
   }
@@ -2011,14 +2015,15 @@ void NativeViewport::setPreviewScene(const QString &path, qint64 count) {
   if (mProcessingPreviewVisible) previewSignals.unblock();
   QScopedValueRollback<std::shared_ptr<SceneState>> sceneScope(mScene, mProcessingScene);
   QScopedValueRollback<bool> background(mRenderingInactiveScene, !mProcessingPreviewVisible);
-  loadContinuousScene(path, count);
+  loadContinuousScene(path, count, integrity);
 }
 
-void NativeViewport::loadContinuousScene(const QString &path, qint64 count) {
+void NativeViewport::loadContinuousScene(const QString &path, qint64 count, const ObservationFileIntegrity &integrity) {
   if (mScene == mProcessingScene && mProcessingPreviewPaused) {
     if (QFileInfo(path).isFile()) {
       mPausedPreviewCandidatePath = path;
       mPausedPreviewCandidateCount = count;
+      mPausedPreviewCandidateIntegrity = integrity;
     }
     return;
   }
@@ -2026,6 +2031,7 @@ void NativeViewport::loadContinuousScene(const QString &path, qint64 count) {
   if (mScene->previewLoadBusy) {
     mScene->queuedPreviewPath = path;
     mScene->queuedPreviewCount = count;
+    mScene->queuedPreviewIntegrity = integrity;
     return;
   }
   // Do not invalidate visible geometry or the user's camera while reading.
@@ -2036,6 +2042,7 @@ void NativeViewport::loadContinuousScene(const QString &path, qint64 count) {
   }
   mScene->mRequestedScenePath = path;
   mScene->requestedPreviewCount = count;
+  mScene->requestedPreviewIntegrity = integrity;
   mScene->previewLoadBusy = true;
   mScene->previewLoadFailed = false;
   if (context() && context()->isValid() && !mScene->buffersInitialized) {
@@ -4100,7 +4107,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
                                     const bool preserveView, const bool forcePaged,
                                     std::shared_ptr<ResourceReservation> reservation) {
   if (mScene == mProcessingScene && mProcessingPreviewPaused) {
-    setPreviewScene(scenePath, mScene->requestedPreviewCount);
+    setPreviewScene(scenePath, mScene->requestedPreviewCount, mScene->requestedPreviewIntegrity);
     mScene->previewLoadBusy = false;
     mScene->resourceLoading = false;
     return;
@@ -4162,11 +4169,12 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
               mScene->previewLoadBusy = false;
               const auto queued = mScene->queuedPreviewPath;
               const auto count = mScene->queuedPreviewCount;
+              const auto integrity = mScene->queuedPreviewIntegrity;
               mScene->queuedPreviewPath.clear();
-              if (!queued.isEmpty()) QTimer::singleShot(0, this, [this, weakScene, queued, count, generation]() {
+              if (!queued.isEmpty()) QTimer::singleShot(0, this, [this, weakScene, queued, count, integrity, generation]() {
                 const auto scene = weakScene.lock();
                 if (scene && scene == mProcessingScene && scene->mSceneGeneration == generation)
-                  setPreviewScene(queued, count);
+                  setPreviewScene(queued, count, integrity);
               });
             }
             if (!data.isValid()) {
@@ -4338,8 +4346,9 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             updateManagedResourceUsage();
             emit resourceBudgetStatusChanged();
           });
+  const auto observation = continuous ? mScene->requestedPreviewIntegrity : ObservationFileIntegrity{};
   watcher->setFuture(QtConcurrent::run(
-      [scenePath, reservation, forcePaged]() {
+      [scenePath, reservation, forcePaged, observation]() {
         try {
           auto data = PlyPointCloudLoader::load(scenePath,
             PlyPointCloudLoader::DefaultMaximumPreviewPoints,
@@ -4347,7 +4356,7 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             PlyPointCloudLoader::DefaultMaximumResidentMeshVertices,
             PlyPointCloudLoader::DefaultMaximumResidentMeshFaces,
             PlyPointCloudLoader::DefaultMaximumResidentMeshBytes,
-            LoaderResourcePolicy{reservation, forcePaged});
+            LoaderResourcePolicy{reservation, forcePaged, observation});
           data.resourceLimited = !data.isValid() && reservation->admissionWasRefused();
           return data;
         } catch (const std::bad_alloc &) {

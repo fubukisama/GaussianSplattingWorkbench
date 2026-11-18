@@ -3119,6 +3119,7 @@ void MainWindow::connectServices() {
               mViewport->stopTrainingGpuPreview();
               mLiveTrainingPreviewPath.clear();
               mLiveTrainingGaussianCount = 0;
+              mLiveTrainingPreviewIntegrity = {};
               mLastTrainingPreviewIteration = -1;
               mLastTrainingSparsePreviewIteration = -1;
               mViewport->beginProcessingPreview();
@@ -3143,8 +3144,14 @@ void MainWindow::connectServices() {
   connect(&mProcessSupervisor, &ProcessSupervisor::outputReady, this,
           &MainWindow::appendLog);
   connect(&mProcessSupervisor,
-          &ProcessSupervisor::trainingGpuPreviewReady, mViewport,
-          &NativeViewport::setTrainingGpuPreviewDescriptor);
+          &ProcessSupervisor::trainingGpuPreviewReady, this,
+          [this](const TrainingGpuPreviewDescriptor &descriptor) {
+            if (mPendingTraining && mPendingTraining->launched &&
+                mPendingTraining->observation.acceptGpu(descriptor.observationStream))
+              mViewport->setTrainingGpuPreviewDescriptor(descriptor);
+            else if (mPendingTrainingBatch && !mPendingTraining && descriptor.observationStream.isEmpty())
+              mViewport->setTrainingGpuPreviewDescriptor(descriptor);
+          });
   connect(&mProcessSupervisor, &ProcessSupervisor::workerStatusReady, this,
           [this](const WorkerStatus &status) {
             mActiveWorkerState = status.state;
@@ -3210,20 +3217,28 @@ void MainWindow::connectServices() {
               }
 
               const QFileInfo previewInfo(status.previewPath);
+              ObservationFileIntegrity integrity;
+              const bool observation = mPendingTraining &&
+                  (status.previewKind == QStringLiteral("gaussian_initial") ||
+                   status.previewKind == QStringLiteral("gaussian_live"));
               if (lastPreviewIteration != nullptr &&
                   status.previewIteration.value() > *lastPreviewIteration &&
                   previewInfo.isFile() &&
                   previewInfo.suffix().compare(QStringLiteral("ply"),
                                                Qt::CaseInsensitive) == 0 &&
                   pathIsWithinDirectory(previewInfo.absoluteFilePath(),
-                                        allowedRoot)) {
+                                        allowedRoot) &&
+                  (!observation || (mPendingTraining->launched && mPendingTraining->observation.acceptFile(
+                      status.previewObservation, status.previewPath, *status.previewIteration,
+                      status.gaussianCount.value_or(0), integrity)))) {
                 *lastPreviewIteration = status.previewIteration.value();
                 *livePreviewPath =
                     comparablePath(previewInfo.absoluteFilePath());
                 *livePreviewCount = status.gaussianCount.value_or(0);
                 // Maintain a CPU/file fallback even when shared GPU rendering is
                 // connected. A publisher disconnect must not reveal an empty view.
-                mViewport->setPreviewScene(*livePreviewPath, *livePreviewCount);
+                if (mPendingTraining) mLiveTrainingPreviewIntegrity = integrity;
+                mViewport->setPreviewScene(*livePreviewPath, *livePreviewCount, integrity);
                 appendTaskEvent(
                     colmapPreview
                         ? QCoreApplication::translate("Workbench", "COLMAP 稀疏点云已更新：快照 %1 · %2 个点")
@@ -7234,6 +7249,8 @@ void MainWindow::resumeTrainingJob(const ActiveTrainingJob &active, const QStrin
   config.insert(QStringLiteral("repositoryRoot"), root);
   config.insert(QStringLiteral("overwrite"), false);
   config.insert(QStringLiteral("runColmap"), false);
+  const QString previewRun = QUuid::createUuid().toString(QUuid::Id128);
+  config.insert(QStringLiteral("observationRunId"), previewRun);
   const QString configPath = QDir(mWorkspace.rootPath()).filePath(
       QStringLiteral(".gsw/jobs/resume-%1.json").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
   QSaveFile file(configPath);
@@ -7275,6 +7292,9 @@ void MainWindow::resumeTrainingJob(const ActiveTrainingJob &active, const QStrin
     return;
   }
   mPendingTraining = PendingTraining{taskName, comparablePath(mWorkspace.rootPath()), comparablePath(dataset), output, backend, total, resultId, previous};
+  mPendingTraining->observation = TrainingObservationAdmission(previewRun, backend,
+      resumeCameraOptions.posePolicy == QStringLiteral("locked")
+          ? config.value(QStringLiteral("cameraDatasetIdentity")).toString() : QString(), output);
   mPendingTraining->historyId = experiment.id;
   mPauseRequested = false;
   mLiveReconstructionPreviewPath.clear();
@@ -7517,6 +7537,8 @@ void MainWindow::startTraining() {
   QJsonObject workerConfig;
   workerConfig.insert(QStringLiteral("projectRoot"), mWorkspace.rootPath());
   workerConfig.insert(QStringLiteral("nativeCheckpoint"), true);
+  const QString previewRun = QUuid::createUuid().toString(QUuid::Id128);
+  workerConfig.insert(QStringLiteral("observationRunId"), previewRun);
   workerConfig.insert(QStringLiteral("repositoryRoot"), QDir::cleanPath(root));
   workerConfig.insert(QStringLiteral("datasetPath"),
                       QDir::cleanPath(mWorkspace.datasetPath()));
@@ -7584,6 +7606,8 @@ void MainWindow::startTraining() {
       taskName, comparablePath(mWorkspace.rootPath()),
       comparablePath(mWorkspace.datasetPath()), outputDirectory,
       config.backend, config.iterations, resultId, previous};
+  mPendingTraining->observation = TrainingObservationAdmission(previewRun, config.backend,
+      config.posePolicy == QStringLiteral("locked") ? config.cameraDatasetIdentity : QString(), outputDirectory);
   mPendingTraining->historyId = experiment.id;
   mPauseRequested = false;
   mLiveReconstructionPreviewPath.clear();
@@ -7648,7 +7672,7 @@ void MainWindow::updateWorkspaceUi() {
   mViewport->setProjectLabel(projectName);
   if (mPendingTraining.has_value() && !mLiveTrainingPreviewPath.isEmpty()) {
     mViewport->setPreviewScene(mLiveTrainingPreviewPath,
-                        mLiveTrainingGaussianCount);
+                        mLiveTrainingGaussianCount, mLiveTrainingPreviewIntegrity);
   } else if (!mPendingTraining && mWorkspace.sceneObjects().isEmpty() &&
              !mLiveReconstructionPreviewPath.isEmpty() &&
              QFileInfo::exists(mLiveReconstructionPreviewPath) &&

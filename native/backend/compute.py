@@ -38,6 +38,7 @@ from native.worker.training_summary import (
 )
 from native.worker.training_step_profile import normalize_performance
 from native.worker.training_resource_policy import normalize_growth
+from native.worker.training_observation import admit_file_observation, stream_fields
 WORKSPACE_ROOT = Path(os.environ.get("GS_EDITOR_WORKSPACE_ROOT", ROOT)).resolve()
 DATASETS_DIR = WORKSPACE_ROOT / "datasets"
 OUTPUT_DIR = WORKSPACE_ROOT / "output"
@@ -3279,6 +3280,7 @@ def job_snapshot(job):
         "latest_iteration": job.get("latest_iteration"),
         "preview_iteration": job.get("preview_iteration"),
         "preview_kind": job.get("preview_kind"),
+        "preview_observation": job.get("preview_observation"),
         "point_cloud_path": job.get("point_cloud_path"),
         "partial_point_cloud_path": job.get("partial_point_cloud_path"),
         "point_count": job.get("point_count"),
@@ -3343,6 +3345,17 @@ def apply_training_preview(job, payload):
         if (iteration == job.get("preview_iteration") and
                 job.get("preview_kind") == "training_checkpoint" and kind != "training_checkpoint"):
             return
+        if kind != "training_checkpoint":
+            if not admit_file_observation(job, payload, iteration):
+                return
+            observation = payload.get("observation")
+            if observation is not None:
+                job["observation_stream"] = stream_fields(observation)
+                job["observation_generation"] = observation["generation"]
+                job["observation_iteration"] = iteration
+                job["preview_observation"] = observation
+        else:
+            job.pop("preview_observation", None)
         job["latest_iteration"] = iteration
         job["preview_iteration"] = iteration
         job["partial_point_cloud_path"] = point_cloud_path

@@ -5,6 +5,7 @@
 #include "ResourceBudget.h"
 #include "SceneCoordinates.h"
 #include "QualityMipModelContract.h"
+#include "TrainingObservation.h"
 
 #include <QBitArray>
 #include <QImage>
@@ -134,6 +135,7 @@ struct PointCloudData {
 struct LoaderResourcePolicy final {
   std::shared_ptr<ResourceReservation> reservation;
   bool forcePaged = false;
+  ObservationFileIntegrity observation;
 };
 
 class PlyPointCloudLoader final {

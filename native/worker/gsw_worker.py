@@ -324,7 +324,7 @@ def status_telemetry(snapshot):
         "iteration": ("iteration",),
         "totalIterations": ("total_iterations", "totalIterations"),
         "gaussianCount": ("gaussian_count", "point_count", "gaussianCount"),
-        "previewIteration": ("latest_iteration", "preview_iteration", "previewIteration"),
+        "previewIteration": ("preview_iteration", "latest_iteration", "previewIteration"),
         "densityGuardIteration": ("density_guard_iteration", "densityGuardIteration"),
         "densityGuardDeferred": ("density_guard_deferred", "densityGuardDeferred"),
         "reconstructionViews": ("reconstructionViews",),
@@ -358,6 +358,10 @@ def status_telemetry(snapshot):
     preview_kind = snapshot.get("preview_kind") or snapshot.get("previewKind")
     if isinstance(preview_kind, str) and preview_kind.strip():
         telemetry["previewKind"] = preview_kind.strip()
+    observation = snapshot.get("preview_observation")
+    if (preview_kind in ("gaussian_initial", "gaussian_live") and isinstance(observation, dict)
+            and telemetry.get("previewIteration") == observation.get("iteration")):
+        telemetry["previewObservation"] = observation
     quality = snapshot.get("reconstruction_quality")
     if isinstance(quality, dict):
         for output, source in (("reconstructionViews", "registeredImages"), ("reconstructionInputs", "inputImages"), ("reconstructionPoints", "validPoints")):
@@ -1415,6 +1419,11 @@ def _run_training_owned(config, resume=False, output_gate=None, session=None):
         native_options["native_control"] = {
             "output": str(output), "request": str(request_path), "session": session, "resume": resume,
             "backend": config["backend"]}
+        if "observationRunId" in config:
+            from native.worker.training_observation import is_hex
+            if not is_hex(config["observationRunId"], 32):
+                raise ValueError("invalid_training_observation_run_id")
+            native_options["native_control"]["observationRunId"] = config["observationRunId"]
         pause_callback = lambda: atomic_json(request_path, {"session": session})
         manifest = None
         if resume:

@@ -1,4 +1,4 @@
-# LichtFeld training visualization: first source-port slice
+# LichtFeld training visualization
 
 ## Decision and interface
 
@@ -40,11 +40,31 @@ acceptance items.
 | Full Mip-Splatting | Declined deliberately | Native validated fused model + sidecar and original filter |
 | Point clouds, meshes, saved/reference models | Not changed | Existing pipeline, depth/compositing and editing |
 
-Non-goals for this slice: producer protocol/version and dataset/frame envelope,
-independent frame-age timing, new buffer/synchronization policies, Vulkan bridge,
-new trainer/optimizer, new unit conversion, reference model transforms, full
-P0 verification/installation, and a default switch. Moving projection code
-advances the port but does not complete any of those items.
+## Live observation contract
+
+New native 3DGS and 2DGS runs carry a fresh run ID, the admitted input data
+identity (when available), the full-state training identity, the actual
+coordinate frame and the applied source/canonical-to-training transforms.
+Training coordinates remain `u`; declaring source metres does not change their
+unit. A legacy input without a canonical data identity remains explicit about
+the missing identity. A new run or a full-state resume has a new observation
+lifetime; loading a newer observation never changes the training schedule.
+
+Fallback PLYs carry a strictly advancing iteration and file generation,
+representation layout/count and SHA-256. The loader verifies the bounded file
+using the same read handle before applying it. The 3DGS shared-memory stream
+uses the same run/frame identity and retains its own slot generations and
+existing producer/consumer fences. These generations are not interchangeable.
+Producer monotonic time and renderer elapsed time are from different clocks;
+neither is reported as screen presentation latency. Periodic snapshots are
+DC-only and bounded, and the 2DGS path retains exactly two log scales. None of
+these read-only payloads is a resumable checkpoint.
+
+Pausing the view leaves optimization running. The latest existing observation
+is kept for unpause, not a queue of past models. Selecting a reference or using
+the free camera does not modify the dataset or the trained camera parameters.
+The experiment remains off by default. It does not replace the LS Vulkan engine,
+change the scene's unit/scale, or add a quality or performance guarantee.
 
 ## Verification and evidence boundaries
 
@@ -57,12 +77,14 @@ advances the port but does not complete any of those items.
   unchanged reference. It retains raw frames when the smoke output directory is
   supplied. `native_training_isolation` and `native_processing_preview` retain
   the original integration checks.
-- These bounded fixtures use synthetic observations on the remote Windows
-  software OpenGL runner. They are not actual running optimizer tests. CUDA
-  live model/iteration evidence, real simultaneous orbit and training, actual
-  densification/pruning, full-state invariance/resume, device faults and package
-  delivery remain `not_verified`. No public/managed update or local install is
-  part of this first slice.
+- Those bounded fixtures use synthetic observations on the remote Windows
+  software OpenGL runner, not an actual optimizer. The opt-in
+  [live training verifier](../scripts/verify_live_training_preview.py) uses a
+  fresh copy of the procedural, no-prior demo dataset and only starts CUDA once
+  its private Windows desktop can render. It records distinct completed GL
+  framebuffers during optimization, orbit/pan/zoom and independent preview
+  pause, plus actual growth/removal, full-state restore and locked training-camera
+  evidence. A captured framebuffer is not a displayed frame or interop speed test.
 
 ## 简体中文
 
@@ -70,8 +92,9 @@ advances the port but does not complete any of those items.
 第一段移植的是 LS 的非中心主点／正交投影与高斯覆盖范围限制，接在 GSW 的
 现有训练观察帧上。预览会给出实际传输方式或回退原因。原工程、导出、相机、
 数据单位与训练状态不修改。2DGS 继续使用原生双尺度表面元显示，Full Mip-Splatting
-继续使用现有正确路线。不是全套 LS Vulkan 渲染器，也没有改变训练预览传输。
-真实 GPU 持续训练、增密／剪枝、完整续训、性能与安装仍是独立未验证项。
+继续使用现有正确路线。新任务的观察帧绑定训练、数据和坐标身份；暂停预览不暂停
+优化。快照仅用于观察，完整续训仍使用原生检查点。并非全套 LS Vulkan 渲染器，
+不以训练预览替代共享显存、性能或安装发布验收。
 
 ## 日本語
 
@@ -79,6 +102,8 @@ advances the port but does not complete any of those items.
 現在の起動中だけ有効です。偏心主点・平行投影のヤコビアンとスプラットの
 描画範囲制限を、既存の 3DGS 学習プレビューに接続します。プロジェクト、
 書き出し、カメラ、単位、学習状態は変更しません。2DGS の二尺度サーフェルと
-完全な Mip-Splatting は既存の描画経路を使います。LS の Vulkan 描画全体や
-学習プレビューの転送方式を移植したものではありません。実 GPU 学習、
-高密度化・枝刈り、完全状態からの再開、性能、インストールは別の未検証項目です。
+完全な Mip-Splatting は既存の描画経路を使います。新規タスクの観察フレームには
+学習・データ・座標系の識別子が付き、プレビューの一時停止は最適化を停止しません。
+完全な学習再開にはネイティブチェックポイントを使用します。LS の Vulkan 描画全体や
+学習プレビューの転送方式を移植したものではありません。学習時のフレーム確認、
+共有メモリーの相互運用、性能、インストールは別々に検証します。

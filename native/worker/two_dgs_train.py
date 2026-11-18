@@ -163,7 +163,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         native_runtime.register_surfel_adapter(render_training.capability)
         emit_gsw_event('[gsw-surfel-auxiliary]', render_training.capability)
     preview_policy = TrainingPreviewPolicy(memory_probe=torch.cuda.mem_get_info, emit=emit_gsw_event)
-    file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event, policy=preview_policy)
+    file_preview = TrainingPreviewPublisher(scene.model_path, emit_gsw_event, policy=preview_policy,
+        control=native_control, training_identity=identity,
+        camera_contract=getattr(dataset, "_gsw_camera_contract", None))
     try:
         file_preview.publish_gaussians(gaussians, first_iter, initial=True)
     except Exception as error:

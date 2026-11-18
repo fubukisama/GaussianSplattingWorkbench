@@ -43,6 +43,7 @@ struct WorkerStatus final {
   QJsonObject trainingGrowth;
   QJsonObject runtimeConfiguration;
   QJsonObject trainingDelivery;
+  QJsonObject previewObservation;
   QString failureReason;
 };
 

@@ -105,6 +105,7 @@ private:
     ActiveTrainingJob previousRecovery;
     bool launched = false;
     QString historyId;
+    TrainingObservationAdmission observation;
   };
 
   struct PendingReconstruction {
@@ -408,6 +409,7 @@ private:
   QString mLiveTrainingPreviewPath;
   qint64 mLiveTrainingGaussianCount = 0;
   int mLastTrainingPreviewIteration = -1;
+  ObservationFileIntegrity mLiveTrainingPreviewIntegrity;
   int mLastTrainingSparsePreviewIteration = -1;
   QString mLiveReconstructionPreviewPath;
   QString mLiveReconstructionDatasetPath;

@@ -130,6 +130,9 @@ bool parseTrainingGpuPreviewDescriptor(
 
   TrainingGpuPreviewDescriptor parsed;
   parsed.sessionId = session.toString();
+  const auto stream = object.value(QStringLiteral("observationStream"));
+  if (!stream.isUndefined() && (!stream.isObject() || stream.toObject().isEmpty())) return false;
+  parsed.observationStream = stream.toObject();
   const QString stateName = state.toString();
   if (stateName == QStringLiteral("closing")) {
     parsed.state = TrainingGpuPreviewState::Closing;

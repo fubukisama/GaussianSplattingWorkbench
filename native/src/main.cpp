@@ -76,12 +76,15 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QUuid>
+#include <QVBoxLayout>
 #include <QWheelEvent>
 #include <QWidget>
 #include <QWindow>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 
 #ifdef _WIN32
@@ -93,6 +96,38 @@
 #define GSW_WIDEN(value) GSW_WIDEN_IMPL(value)
 
 namespace {
+// No caller can receive a local live-test window on the input desktop. The
+// private desktop is never switched in, even if Qt creates a helper window.
+class LiveTestDesktop final {
+public:
+  bool initialize() {
+    previous = GetThreadDesktop(GetCurrentThreadId());
+    const auto name = (QStringLiteral("GSWLiveQA-") + QUuid::createUuid().toString(QUuid::Id128)).toStdWString();
+    owned = CreateDesktopW(name.c_str(), nullptr, nullptr, 0,
+                           DESKTOP_CREATEWINDOW | DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS, nullptr);
+    BOOL inputDesktop = TRUE;
+    DWORD needed = 0;
+    const char *phase = !owned ? "create" :
+        !GetUserObjectInformationW(owned, UOI_IO, &inputDesktop, sizeof(inputDesktop), &needed) ? "input-query" :
+        inputDesktop ? "must-not-be-input-desktop" :
+        !SetThreadDesktop(owned) ? "attach" :
+        GetThreadDesktop(GetCurrentThreadId()) != owned ? "desktop-readback" : nullptr;
+    if (!phase) return true;
+    std::fprintf(stderr, "Live QA desktop refused: %s (Win32 %lu)\n", phase, GetLastError());
+    std::fflush(stderr);
+    return false;
+  }
+  ~LiveTestDesktop() {
+    if (owned) {
+      if (previous && GetThreadDesktop(GetCurrentThreadId()) == owned) SetThreadDesktop(previous);
+      CloseDesktop(owned);
+    }
+  }
+private:
+  HDESK previous = nullptr;
+  HDESK owned = nullptr;
+};
+
 bool configureWindowsApplicationIdentity() {
   constexpr const wchar_t *expectedId = GSW_WIDEN(GSW_APP_USER_MODEL_ID);
   if (FAILED(SetCurrentProcessExplicitAppUserModelID(expectedId))) {
@@ -113,6 +148,16 @@ bool configureWindowsApplicationIdentity() {
 #endif
 
 int main(int argc, char *argv[]) {
+  const bool liveTestRequested = std::any_of(argv + 1, argv + argc, [](const char *arg) {
+    const QByteArrayView flag(arg);
+    return flag == QByteArrayView("--smoke-test-live-training") || flag.startsWith("--smoke-test-live-training=");
+  });
+#ifdef _WIN32
+  LiveTestDesktop liveDesktop;
+  if (liveTestRequested && (qgetenv("GSW_SMOKE_BACKGROUND") != "1" || !liveDesktop.initialize())) return 17;
+#else
+  if (liveTestRequested) return 17;
+#endif
   gsw::qa::NativeGridQaTrace gridQaTrace(argc, argv);
   using GridQaPhase = gsw::qa::NativeGridQaPhase;
 #ifdef _WIN32
@@ -434,6 +479,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption lichtFeldPreviewOption(QStringLiteral("smoke-test-lichtfeld-preview"),
       QStringLiteral("Verify the experimental LichtFeld footprint and unchanged native preview fallbacks."));
   parser.addOption(lichtFeldPreviewOption);
+  QCommandLineOption liveTrainingOption(QStringLiteral("smoke-test-live-training"),
+      QStringLiteral("Verify a live trainer in a disposable, non-activating viewport."), QStringLiteral("case"));
+  parser.addOption(liveTrainingOption);
   QCommandLineOption processingCompletionOption(QStringLiteral("smoke-test-processing-completion"),
       QStringLiteral("Verify completed model workflows restore inspect and editing tools."));
   parser.addOption(processingCompletionOption);
@@ -483,6 +531,22 @@ int main(int argc, char *argv[]) {
 
   if (parser.isSet(blenderViewportSmokeTestOption)) {
     return gsw::runBlenderViewportVisualTests(application);
+  }
+
+  if (parser.isSet(liveTrainingOption)) {
+    if (!liveTestRequested || parser.isSet(projectOption) || !parser.positionalArguments().isEmpty()) return 17;
+    // Standalone production viewport only. Skip project creation, dock
+    // restoration and any dialog triggered by recovery/workspace discovery.
+    QWidget host(nullptr, Qt::Tool | Qt::WindowDoesNotAcceptFocus);
+    host.setAttribute(Qt::WA_DontShowOnScreen);
+    host.setAttribute(Qt::WA_ShowWithoutActivating);
+    auto *layout = new QVBoxLayout(&host);
+    layout->setContentsMargins(0, 0, 0, 0);
+    auto *viewport = new gsw::NativeViewport(&host);
+    layout->addWidget(viewport);
+    host.resize(1280, 800);
+    host.show();
+    return gsw::runLiveTrainingSmokeTest(*viewport, parser.value(liveTrainingOption)) ? 0 : 2;
   }
 
   application.setProperty("gswInitialMediaSources",

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArrayView>
+#include <QJsonObject>
 #include <QMetaType>
 #include <QString>
 #include <QStringList>
@@ -38,6 +39,7 @@ struct TrainingGpuPreviewDescriptor final {
   QString deviceLuid;
   quint32 deviceNodeMask = 0;
   QString error;
+  QJsonObject observationStream;
 };
 
 enum class TrainingGpuPreviewControlState : quint32 {

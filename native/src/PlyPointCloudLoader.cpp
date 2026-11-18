@@ -4,6 +4,7 @@
 #include "GaussianPlyTransform.h"
 
 #include <QDateTime>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -2107,6 +2108,21 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
     return result;
   }
 
+  const auto &observation = resourcePolicy.observation;
+  const auto unreadableObservation = [&result] {
+    result.error = QCoreApplication::translate("Workbench", "Training preview snapshot failed integrity verification.");
+  };
+  if (!observation.sha256.isEmpty()) {
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    if (observation.count <= 0 || observation.count > 500'000 ||
+        (observation.rowFloats != 13 && observation.rowFloats != 14) ||
+        file.size() > 500'000LL * 14 * 4 + kMaximumHeaderBytes ||
+        !hash.addData(&file) || hash.result() != observation.sha256 || !file.seek(0)) {
+      unreadableObservation();
+      return result;
+    }
+  }
+
   PlyHeader header;
   if (!parseHeader(file, header, result.error)) {
     return result;
@@ -2121,6 +2137,15 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
     return result;
   }
   const ElementDefinition &vertexElement = *vertexElementIterator;
+  if (!observation.sha256.isEmpty() && (header.format != PlyFormat::BinaryLittleEndian ||
+      header.elements.size() != 1 || vertexElement.count != observation.count ||
+      vertexElement.properties.size() != observation.rowFloats ||
+      file.size() != payloadOffset + observation.count * observation.rowFloats * 4LL ||
+      std::any_of(vertexElement.properties.cbegin(), vertexElement.properties.cend(),
+                  [](const auto &prop) { return prop.isList || prop.valueType != ScalarType::Float32; }))) {
+    unreadableObservation();
+    return result;
+  }
   result.sourceVertexCount = vertexElement.count;
   if (maximumEditablePoints <= 0) {
     result.error = QCoreApplication::translate("Workbench", "The editable point limit must be greater than zero.");
@@ -2228,6 +2253,11 @@ PointCloudData PlyPointCloudLoader::load(const QString &filePath,
       std::all_of(rotationIndices.cbegin(), rotationIndices.cend(),
                   isScalarProperty);
   result.hasSurfelAttributes = result.hasGaussianAttributes && scaleIndices[2] < 0;
+  if (!observation.sha256.isEmpty() && (!result.hasGaussianAttributes ||
+      result.hasSurfelAttributes != (observation.rowFloats == 13))) {
+    unreadableObservation();
+    return result;
+  }
   result.qualityMip = qualityForHeader(filePath, header);
   if (!result.qualityMip.errorCode.isEmpty()) {
     result.error = result.qualityMip.errorCode;

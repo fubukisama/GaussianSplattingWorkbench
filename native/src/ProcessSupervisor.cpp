@@ -338,6 +338,7 @@ bool parseWorkerStatus(const QByteArray &payload, WorkerStatus *status) {
     parsedStatus.previewPath = previewPath.toString();
   }
   const QJsonValue previewKind = object.value(QStringLiteral("previewKind"));
+  parsedStatus.previewObservation = object.value(QStringLiteral("previewObservation")).toObject();
   if (!previewKind.isUndefined()) {
     if (!previewKind.isString()) {
       return false;
