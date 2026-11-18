@@ -20,6 +20,11 @@ CI 成果物やローカルプレビューの配布は、自動的に公開 Rele
 
 ## 2026-11-18
 
+- **配布：**[11月18日版のネイティブプレビュー](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261118)
+  の Windows セットアップには、学習中の状態表示と任意の LichtFeld 投影を同梱します。
+  [11月17日版](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)も引き続き入手できます。公開の自動更新には対応しません。
+  [ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/390847cdc1238db7a1025eb417672e9c4dac95bf)
+
 - **修正：**Windows ネイティブパッケージに、3DGS／2DGS のライブ学習プレビューに
   必要なバックエンドモジュールを同梱します。ビルド前に実際の配布用ファイルから
   読み込みを検証し、従来のインストーラー検証も維持します。

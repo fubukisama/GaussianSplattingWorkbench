@@ -14,11 +14,11 @@ Gaussian Splatting Workbench was previously named Gaussian Scene Workbench. The 
 
 ### Download the preview
 
-**[Download Windows x64 Setup (.exe)](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)**
+**[Download Windows x64 Setup (.exe)](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261118/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)**
 
-[SHA-256](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe.sha256) · [Release notes](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
+[SHA-256](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261118/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe.sha256) · [Release notes](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261118) · [Previous Setup (November 17)](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)
 
-Run the downloaded Setup EXE. This is the **0.3.9 native preview** from November 17, 2026, not the newest development commit. GitHub's source ZIP is not an installer. To build development changes, see the [native build guide](native/README.md).
+Run the downloaded Setup EXE. This **November 18, 2026 native preview** includes live training observations and the optional [LichtFeld preview projection](docs/LICHTFELD_VISUALIZATION.md). GitHub's source ZIP is not an installer. To build development changes, see the [native build guide](native/README.md).
 
 ### Before you start
 
@@ -45,11 +45,11 @@ Portable artifacts are separate from Setup and may carry a legacy version in the
 
 ### 下载预览版
 
-**[下载 Windows x64 安装包（.exe）](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)**
+**[下载 Windows x64 安装包（.exe）](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261118/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)**
 
-[SHA-256](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe.sha256) · [发布说明](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
+[SHA-256](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261118/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe.sha256) · [发布说明](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261118) · [11 月 17 日版安装包](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)
 
-直接运行下载的 Setup EXE。这是 2026 年 11 月 17 日构建的 **0.3.9 原生预览版**，不是最新开发提交。GitHub 的源码 ZIP 不是安装包。如需构建开发版，请参阅[原生构建指南](native/README.md)。
+直接运行下载的 Setup EXE。**2026 年 11 月 18 日原生预览版**包含实时训练观察及可选的 [LichtFeld 训练预览投影](docs/LICHTFELD_VISUALIZATION.md)。GitHub 的源码 ZIP 不是安装包。如需构建开发版，请参阅[原生构建指南](native/README.md)。
 
 ### 使用前确认
 
@@ -76,11 +76,11 @@ Portable artifacts are separate from Setup and may carry a legacy version in the
 
 ### プレビュー版の入手
 
-**[Windows x64 版をダウンロード（.exe）](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)**
+**[Windows x64 版をダウンロード（.exe）](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261118/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)**
 
-[SHA-256](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe.sha256) · [リリースノート](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
+[SHA-256](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261118/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe.sha256) · [リリースノート](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261118) · [11月17日版のセットアップ](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)
 
-ダウンロードしたセットアップ EXE を実行します。2026年11月17日にビルドした **0.3.9 ネイティブプレビュー**で、最新の開発コミットではありません。GitHub のソース ZIP はインストーラーではありません。開発版は[ネイティブビルド手順](native/README.md)を参照してください。
+ダウンロードしたセットアップ EXE を実行します。**2026年11月18日版のネイティブプレビュー**は、学習中の状態表示と任意の [LichtFeld 学習プレビュー投影](docs/LICHTFELD_VISUALIZATION.md)に対応します。GitHub のソース ZIP はインストーラーではありません。開発版は[ネイティブビルド手順](native/README.md)を参照してください。
 
 ### 利用前の確認
 

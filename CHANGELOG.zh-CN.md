@@ -19,6 +19,11 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 
 ## 2026-11-18
 
+- **发布：**[11 月 18 日原生预览版](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261118)
+  的 Windows 安装包包含实时训练观察和可选的 LichtFeld 投影。[11 月 17 日版](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
+  仍可下载。两版都只提供手动下载，不开放公共自动更新。
+  [源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/390847cdc1238db7a1025eb417672e9c4dac95bf)
+
 - **修复：**Windows 原生包补齐了 3DGS／2DGS 实时训练预览所需的后端模块。
   构建前新增来自实际打包目录的独立导入检查，原有安装包验收继续执行。
   [源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/9c6b00ce898c97761359c48e52a1cb436cfddfb3)

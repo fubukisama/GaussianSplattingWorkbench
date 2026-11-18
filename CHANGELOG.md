@@ -22,6 +22,12 @@ separate claims.
 
 ## 2026-11-18
 
+- **Distribution:** The [November 18 native preview](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261118)
+  brings live training observations and the optional LichtFeld projection to
+  the Windows Setup download. The [November 17 preview](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
+  remains available. Both are manual downloads, not an automatic-update channel.
+  [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/390847cdc1238db7a1025eb417672e9c4dac95bf)
+
 - **Fixed:** The Windows native package includes the worker module needed by
   live 3DGS and 2DGS training previews. An isolated package import check now
   runs before the native build, and the final installer checks still run.

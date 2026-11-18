@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe"><strong>Download for Windows x64 (.exe)</strong></a> ·
+  <a href="https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261118/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe"><strong>Download for Windows x64 (.exe)</strong></a> ·
   <a href="README_RELEASE.md#english">Installation guide</a>
 </p>
 
