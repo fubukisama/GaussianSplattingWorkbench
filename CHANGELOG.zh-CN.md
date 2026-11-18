@@ -19,6 +19,11 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 
 ## 2026-11-18
 
+- **修复：**Windows 上重连运行中的批任务，或向它发出暂停、取消请求时，若读取批任务租约
+  遇到短暂的文件共享冲突，会有限重读并重新校验进程与会话身份。租约仍不可读或已关闭时，
+  不发出命令。原有超时不变；完整 CI 和交付另行记录。
+  [源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/3e230eff66db5d535d1a95da5128e82767f2afde)
+
 - **发布：**[0.3.9 Windows x64 原生预览版](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
   提供 Setup 手动下载和 SHA-256 校验文件。这是通过验收的 11 月 17 日构建，不含下方较新的
   训练预览改动。安装包未签名，未开放公共自动更新通道。

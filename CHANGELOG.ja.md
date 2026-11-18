@@ -20,6 +20,12 @@ CI 成果物やローカルプレビューの配布は、自動的に公開 Rele
 
 ## 2026-11-18
 
+- **修正：**Windows で実行中のバッチへの再接続や一時停止・取消の要求時に、
+  リースファイルの共有違反に限り短時間だけ読み取りを再試行します。プロセスと
+  セッションの識別情報は再検証し、読めないリースや終了済みのリースには要求を
+  送りません。従来のタイムアウトは変更しません。全 CI と配布の結果は別途記録します。
+  [ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/3e230eff66db5d535d1a95da5128e82767f2afde)
+
 - **配布：**[0.3.9 Windows x64 ネイティブプレビュー](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
   のセットアップと SHA-256 を公開しました。検証済みの11月17日ビルドで、下記の新しい
   学習プレビューの変更は含みません。セットアップは未署名です。公開の自動更新

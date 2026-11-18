@@ -22,6 +22,13 @@ separate claims.
 
 ## 2026-11-18
 
+- **Fixed:** On Windows, reconnecting to a live batch and requesting pause or
+  cancellation now briefly retry a sharing conflict while reading the batch
+  lease. The new read still checks the worker and session identities; an
+  inaccessible or closed lease cannot send a command. Existing time limits
+  remain unchanged. Full CI and delivery are tracked separately.
+  [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/3e230eff66db5d535d1a95da5128e82767f2afde)
+
 - **Distribution:** The [0.3.9 Windows x64 native preview](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
   is available as a manual Setup download with SHA-256. It is the verified
   November 17 build, not the newer training preview changes below. The Setup
