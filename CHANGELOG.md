@@ -23,6 +23,14 @@ separate claims.
 
 ## 2026-11-18
 
+- **Training preview:** Bind live 3DGS and 2DGS observations to their runs,
+  input data and training frames. The native viewport verifies file digests and
+  keeps the latest snapshot when unpausing; the 2DGS model retains two scales.
+  Local GPU fixtures exercised free navigation, live model updates, real
+  growth/removal and exact full-state restore. This is not the full LS renderer
+  or a CUDA/OpenGL sharing or release acceptance claim.
+  [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/645872411c0ec7369f9c6c0990665c7fc7730208)
+
 - **Experimental:** [LichtFeld training-preview projection](docs/LICHTFELD_VISUALIZATION.md)
   adds an opt-in 3DGS viewport path with the ported covariance projection and
   screen extent limit. The choice resets on exit; training, original models,

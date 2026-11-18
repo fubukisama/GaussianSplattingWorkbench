@@ -21,6 +21,13 @@ Gaussian Splatting Workbench の利用者向け変更を新しい順に記録し
 
 ## 2026-11-18
 
+- **学習プレビュー：**3DGS／2DGS の観察フレームを学習タスク、入力データ、学習座標系に
+  関連付けます。ファイルのハッシュを検証し、観察再開時に最新フレームを表示します。
+  2DGS の二尺度は維持します。独立した GPU 検証で視点操作、モデル更新、実際の
+  高密度化・削除、完全状態の復元を確認しました。LS 描画全体、CUDA／OpenGL の
+  メモリー共有、配布版の検証を示すものではありません。
+  [ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/645872411c0ec7369f9c6c0990665c7fc7730208)
+
 - **実験機能：**[LichtFeld 学習プレビュー投影](docs/LICHTFELD_VISUALIZATION.md)に
   対応する 3DGS の投影と描画範囲制限を追加しました。既定は無効で、終了後は保持
   しません。学習、元のモデル、書き出し、2DGS、完全な Mip-Splatting の従来経路は

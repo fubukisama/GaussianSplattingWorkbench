@@ -19,6 +19,12 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 
 ## 2026-11-18
 
+- **训练预览：**3DGS／2DGS 实时观察绑定任务、输入数据和训练坐标。原生视口校验
+  快照哈希，恢复观察时接最新帧；2DGS 保留双尺度。独立 GPU 样本验证了自由导航、
+  模型更新、实际增密／删点和完整状态恢复。不代表完整 LS 渲染器、CUDA／OpenGL
+  共享缓冲或发布验收通过。
+  [源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/645872411c0ec7369f9c6c0990665c7fc7730208)
+
 - **实验功能：**[LichtFeld 训练预览投影](docs/LICHTFELD_VISUALIZATION.md)
   为兼容的 3DGS 训练观察提供可选的移植投影与覆盖范围限制。默认关闭，退出不保留。
   不修改训练、原模型或导出；2DGS 和 Full Mip-Splatting 保留原生路线。这是第一段源码
