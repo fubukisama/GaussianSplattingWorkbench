@@ -248,16 +248,17 @@ void ProcessSupervisorTests::batchMigrationRejectsDamagedLaunchMarker(){
 
 void ProcessSupervisorTests::persistentBatchObserverDetachesAndReattaches_data(){
   QTest::addColumn<bool>("cancel");QTest::addColumn<bool>("leasePublicationOpen");
-  QTest::addColumn<bool>("rejectClosedLease");
-  QTest::newRow("pause")<<false<<false<<false;QTest::newRow("cancel-checkpoint")<<true<<false<<false;
-  QTest::newRow("pause-during-lease-publication")<<false<<true<<false;
-  QTest::newRow("closed-lease-during-publication")<<false<<true<<true;
+  QTest::addColumn<bool>("rejectClosedLease");QTest::addColumn<bool>("rejectBusyLease");
+  QTest::newRow("pause")<<false<<false<<false<<false;QTest::newRow("cancel-checkpoint")<<true<<false<<false<<false;
+  QTest::newRow("pause-during-lease-publication")<<false<<true<<false<<false;
+  QTest::newRow("closed-lease-during-publication")<<false<<true<<true<<false;
+  QTest::newRow("busy-lease-rejects-attach-and-control")<<false<<true<<false<<true;
 }
 void ProcessSupervisorTests::persistentBatchObserverDetachesAndReattaches(){
 #ifndef Q_OS_WIN
   QSKIP("Persistent Windows coordinator process identity boundary");
 #else
-  QFETCH(bool,cancel);QFETCH(bool,leasePublicationOpen);QFETCH(bool,rejectClosedLease);
+  QFETCH(bool,cancel);QFETCH(bool,leasePublicationOpen);QFETCH(bool,rejectClosedLease);QFETCH(bool,rejectBusyLease);
   QTemporaryDir temporary;QVERIFY(temporary.isValid());
   const QString root=QDir(temporary.path()).filePath(QStringLiteral(".gsw/training-batches/")+QString(32,QLatin1Char('a')));
   QVERIFY(QDir().mkpath(root));const QString plan=QDir(root).filePath("plan.json"),log=QDir(root).filePath("stdout.log");
@@ -283,6 +284,18 @@ void ProcessSupervisorTests::persistentBatchObserverDetachesAndReattaches(){
   // still allowing observers to read its complete, unchanged metadata. Keep
   // that real filesystem boundary open across the public pause request.
   const QString leasePath=QDir(root).filePath(QStringLiteral(".coordinator.json"));
+  if(rejectBusyLease) {
+    const HANDLE blocked=CreateFileW(reinterpret_cast<LPCWSTR>(leasePath.utf16()),GENERIC_READ,
+      FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    QVERIFY(blocked!=INVALID_HANDLE_VALUE);
+    const auto unblock=qScopeGuard([&]{CloseHandle(blocked);});
+    ProcessSupervisor newcomer;
+    QVERIFY(!newcomer.attachPersistentBatch("batch-observe",plan,log));
+    QVERIFY(!newcomer.isPersistentTask());
+    QVERIFY(!observer.requestPause());QVERIFY(!observer.wasStopRequested());
+    QVERIFY(processIsRunning(pid));QCOMPARE(finished.count(),0);
+    QVERIFY(!QFileInfo::exists(QDir(root).filePath(QStringLiteral(".coordinators/")+QString(32,QLatin1Char('d'))+QStringLiteral("-cmd.json"))));
+  }
   QJsonObject validLease;
   if(rejectClosedLease) {
     QFile lease(leasePath);QVERIFY(lease.open(QIODevice::ReadOnly));

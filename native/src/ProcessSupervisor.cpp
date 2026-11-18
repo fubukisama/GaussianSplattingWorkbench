@@ -163,16 +163,34 @@ bool persistentSafePath(const QString &path) {
   return true;
 }
 
-QJsonObject readPersistentObject(const QString &path,const qint64 maximum) {
+enum class PersistentMetadataOpen { Once, BatchLease };
+
+QJsonObject readPersistentObject(const QString &path, const qint64 maximum,
+    PersistentMetadataOpen mode = PersistentMetadataOpen::Once) {
   if (!persistentSafePath(path)) return {};
 #ifdef Q_OS_WIN
   // Metadata publishers atomically replace these files. QFile on Windows does
   // not share DELETE access, so it can refuse an otherwise valid lease while
   // its publisher owns the replacement handle. Read one bounded, no-follow
   // handle instead; replacement never changes the snapshot being validated.
-  const HANDLE file=CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),GENERIC_READ,
-      FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
-      FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+  const auto open = [&] {
+    return CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  };
+  HANDLE file = open();
+  if (mode == PersistentMetadataOpen::BatchLease) {
+    // Even with DELETE sharing, a batch heartbeat replacement can briefly
+    // deny this open. Retry only sharing conflicts and validate a fresh
+    // snapshot; never fall back to an older lease or relax its age/identity.
+    constexpr DWORD backoffsMs[] = {1, 2, 4, 8};
+    for (const DWORD backoffMs : backoffsMs) {
+      if (file != INVALID_HANDLE_VALUE || GetLastError() != ERROR_SHARING_VIOLATION) break;
+      Sleep(backoffMs);
+      if (!persistentSafePath(path)) return {};
+      file = open();
+    }
+  }
   if(file==INVALID_HANDLE_VALUE)return {};
   const auto close=qScopeGuard([&]{CloseHandle(file);});
   BY_HANDLE_FILE_INFORMATION before{};
@@ -191,6 +209,7 @@ QJsonObject readPersistentObject(const QString &path,const qint64 maximum) {
       CompareFileTime(&after.ftLastWriteTime,&before.ftLastWriteTime)!=0)return {};
   bytes.resize(read);
 #else
+  Q_UNUSED(mode);
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly) || file.size()>maximum) return {};
   const auto bytes=file.readAll();
@@ -827,7 +846,8 @@ bool ProcessSupervisor::attachPersistentBatch(const QString &taskName,const QStr
 #else
   if(mShutdownStarted||isRunning()||!batchBinding(planPath)||!persistentSafePath(logPath)||!QFileInfo(logPath).isFile()||
       QFileInfo(logPath).absolutePath()!=QFileInfo(planPath).absolutePath())return false;
-  const auto lease=readPersistentObject(QFileInfo(planPath).dir().filePath(QStringLiteral(".coordinator.json")),256*1024);
+  const auto lease=readPersistentObject(QFileInfo(planPath).dir().filePath(QStringLiteral(".coordinator.json")),
+      256*1024,PersistentMetadataOpen::BatchLease);
   const auto identity=lease.value(QStringLiteral("coordinatorIdentity")).toObject();
   const auto pid=identity.value(QStringLiteral("pid")).toInteger(-1);
   if(pid<1||pid>4294967295LL)return false;
@@ -849,7 +869,8 @@ std::optional<QJsonObject> ProcessSupervisor::batchConnection() const {
 #else
   if(!isPersistentBatch()||!mPersistentQueryHandle||mPersistentStartToken.isEmpty())return std::nullopt;
   const auto binding=batchBinding(mPersistentPlanPath);if(!binding)return std::nullopt;
-  const auto lease=readPersistentObject(QFileInfo(mPersistentPlanPath).dir().filePath(QStringLiteral(".coordinator.json")),256*1024);
+  const auto lease=readPersistentObject(QFileInfo(mPersistentPlanPath).dir().filePath(QStringLiteral(".coordinator.json")),
+      256*1024,PersistentMetadataOpen::BatchLease);
   const auto identity=lease.value(QStringLiteral("coordinatorIdentity")).toObject();
   const auto session=lease.value(QStringLiteral("session")).toString();
   static const QRegularExpression id(QStringLiteral("^[0-9a-f]{32}$"));
