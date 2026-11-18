@@ -21,7 +21,11 @@
 </p>
 
 <p align="center">
-  <a href="README_RELEASE.md"><strong>Get the Windows preview</strong></a> ·
+  <a href="https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe"><strong>Download for Windows x64 (.exe)</strong></a> ·
+  <a href="README_RELEASE.md#english">Installation guide</a>
+</p>
+
+<p align="center">
   <a href="docs/README.md">Documentation</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="native/README.md">Build from source</a> ·

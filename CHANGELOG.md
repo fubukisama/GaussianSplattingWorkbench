@@ -10,11 +10,10 @@ older change. Dates use Japan time. [Complete source history](https://github.com
 
 **Status key:** **Implemented** means the linked source change exists. It does not
 mean full verification, a public Release or installation on a particular computer.
-Those require their own exact-version evidence. As of 2026-10-30, the source version
-is `0.3.9-native-preview` and no public native Release has been published. See the
-[download guide](README_RELEASE.md) and [update/rollback guide](docs/NATIVE_UPDATES.md)
-for distribution status and requirements. CI artifacts and local preview deliveries
-are not automatically public Releases.
+Those require their own exact-version evidence. See the [download guide](README_RELEASE.md)
+for the published Windows preview and [update/rollback guide](docs/NATIVE_UPDATES.md)
+for managed installations. CI artifacts and local preview deliveries are not
+automatically public Releases.
 
 Future user-facing additions, changes and fixes must update all three changelogs
 in the same change, with affected capabilities, limitations and verification or
@@ -22,6 +21,12 @@ delivery status. Implementation, verification, publication and installation rema
 separate claims.
 
 ## 2026-11-18
+
+- **Distribution:** The [0.3.9 Windows x64 native preview](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
+  is available as a manual Setup download with SHA-256. It is the verified
+  November 17 build, not the newer training preview changes below. The Setup
+  is unsigned; no public automatic-update channel was enabled.
+  [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/726f32a42ea807e2df32255ce235706e23f4e139)
 
 - **Training preview:** Bind live 3DGS and 2DGS observations to their runs,
   input data and training frames. The native viewport verifies file digests and

@@ -14,20 +14,18 @@ Gaussian Splatting Workbench was previously named Gaussian Scene Workbench. The 
 
 ### Download the preview
 
-There is no public native Release yet. For now, use the artifacts of a **fully successful** [Native Windows run](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) for the commit you want.
+**[Download Windows x64 Setup (.exe)](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)**
 
-1. Open a completed green run and find **Artifacts**.
-2. Download **Gaussian-Scene-Workbench-windows-x64-setup**.
-3. Extract that artifact ZIP, then run the contained `Gaussian-Scene-Workbench-<version>-windows-x64-setup.exe`.
+[SHA-256](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe.sha256) · [Release notes](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
 
-GitHub may require sign-in for artifact downloads, and artifacts expire. A source-code ZIP is not an installer. If a checked installer is unavailable, use the [native build guide](native/README.md), not an unverified or in-progress build.
+Run the downloaded Setup EXE. This is the **0.3.9 native preview** from November 17, 2026, not the newest development commit. GitHub's source ZIP is not an installer. To build development changes, see the [native build guide](native/README.md).
 
 ### Before you start
 
 - **Existing models:** import supported PLY / SPZ files after installing the desktop.
 - **Reconstruction / training:** configure the separate [Windows runtime](docs/WINDOWS_NATIVE_RUNTIME.md) and [COLMAP](docs/COLMAP_SETUP.md) dependencies.
 - **Installation:** keep the full application, DLLs, plugins, notices and matching source together. Choose a writable location; prefer a non-system drive when available. C:-only machines are supported.
-- **Security:** preview installers may be unsigned. Use approved signing/runtime policies; never disable Windows protection just to run a preview.
+- **Security:** this Setup is unsigned. Windows may warn or block it under your policy; keep Windows protection enabled.
 
 ### Updating
 
@@ -47,20 +45,18 @@ Portable artifacts are separate from Setup and may carry a legacy version in the
 
 ### 下载预览版
 
-目前尚无公开的原生 Release。请在所需提交的 [Native Windows](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) **完整成功运行**中获取附件：
+**[下载 Windows x64 安装包（.exe）](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)**
 
-1. 打开已完成的绿色运行，找到 **Artifacts**。
-2. 下载 **Gaussian-Scene-Workbench-windows-x64-setup**。
-3. 解压这个附件 ZIP，运行其中的 `Gaussian-Scene-Workbench-<version>-windows-x64-setup.exe`。
+[SHA-256](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe.sha256) · [发布说明](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
 
-下载 Actions 附件可能需要登录 GitHub，附件也有保存期限。源码 ZIP 不是安装器；没有可用的已验安装器时，按[原生构建指南](native/README.md)构建，不使用失败、未验或仍在运行的产物。
+直接运行下载的 Setup EXE。这是 2026 年 11 月 17 日构建的 **0.3.9 原生预览版**，不是最新开发提交。GitHub 的源码 ZIP 不是安装包。如需构建开发版，请参阅[原生构建指南](native/README.md)。
 
 ### 使用前确认
 
 - **已有模型：**安装桌面端后可导入受支持的 PLY / SPZ。
 - **重建／训练：**另行配置 [Windows 运行环境](docs/WINDOWS_NATIVE_RUNTIME.md)和 [COLMAP](docs/COLMAP_SETUP.md)。
 - **安装位置：**保留完整程序、DLL、插件、声明和对应源码。选择可写目录，有非系统盘时优先使用；只有 C: 的机器也可使用。
-- **安全策略：**预览安装器可能未签名，应使用获准的签名／运行策略，不要为了运行预览版关闭 Windows 防护。
+- **安全策略：**此安装包未签名，Windows 可能警告或按策略阻止。请保留系统防护。
 
 ### 更新方式
 
@@ -80,20 +76,18 @@ Portable artifacts are separate from Setup and may carry a legacy version in the
 
 ### プレビュー版の入手
 
-公開のネイティブ Release はまだありません。対象コミットの [Native Windows](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) で、**全体が成功した実行**から取得します。
+**[Windows x64 版をダウンロード（.exe）](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe)**
 
-1. 完了した緑色の実行を開き、**Artifacts** を確認。
-2. **Gaussian-Scene-Workbench-windows-x64-setup** をダウンロード。
-3. 添付ZIPを展開し、`Gaussian-Scene-Workbench-<version>-windows-x64-setup.exe` を実行。
+[SHA-256](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe.sha256) · [リリースノート](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
 
-Actions 添付の取得には GitHub サインインが必要な場合があり、保存期限もあります。ソースZIPはインストーラーではありません。検証済みSetupがなければ[ネイティブビルド手順](native/README.md)を使い、失敗・未検証・実行中の成果物は使わないでください。
+ダウンロードしたセットアップ EXE を実行します。2026年11月17日にビルドした **0.3.9 ネイティブプレビュー**で、最新の開発コミットではありません。GitHub のソース ZIP はインストーラーではありません。開発版は[ネイティブビルド手順](native/README.md)を参照してください。
 
 ### 利用前の確認
 
 - **既存モデル：**デスクトップ導入後、対応する PLY / SPZ を取り込めます。
 - **再構築・学習：**別途 [Windows 実行環境](docs/WINDOWS_NATIVE_RUNTIME.md)と [COLMAP](docs/COLMAP_SETUP.md) を構成します。
 - **導入先：**DLL・プラグイン・通知・対応ソースを含め全体を保持します。書込み可能な場所を選び、利用できれば非システムドライブを優先。C: のみの端末も対象です。
-- **安全性：**プレビューSetupは未署名の場合があります。承認された署名・実行ポリシーを使い、Windowsの保護を無効にしないでください。
+- **安全性：**このセットアップは未署名です。Windows の警告やポリシーによるブロックが発生する場合があります。Windows の保護を無効にしないでください。
 
 ### 更新
 

@@ -10,14 +10,19 @@
 
 **状态说明：** **已实现**表示链接对应的源码修改已存在，不等于完成全部验证、
 公开发布 Release，或已经安装到某台电脑；后三者分别需要对应版本的证据。
-截至 2026-10-30，源码版本为 `0.3.9-native-preview`，尚无公开的原生 Release。
-发行状态和要求见[下载指南](README_RELEASE.md)及[更新／回退指南](docs/NATIVE_UPDATES.md)。
+公开的 Windows 预览版见[下载指南](README_RELEASE.md)，托管安装见
+[更新／回退指南](docs/NATIVE_UPDATES.md)。
 CI 附件和本地预览版交付不会自动成为公开 Release。
 
 以后新增、修改或修复面向用户的功能，必须在同一变更中同步更新三语日志，写明影响能力、
 限制及验证或交付状态。“已实现、已验证、已发布、已安装”分别记录，不相互替代。
 
 ## 2026-11-18
+
+- **发布：**[0.3.9 Windows x64 原生预览版](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview)
+  提供 Setup 手动下载和 SHA-256 校验文件。这是通过验收的 11 月 17 日构建，不含下方较新的
+  训练预览改动。安装包未签名，未开放公共自动更新通道。
+  [源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/726f32a42ea807e2df32255ce235706e23f4e139)
 
 - **训练预览：**3DGS／2DGS 实时观察绑定任务、输入数据和训练坐标。原生视口校验
   快照哈希，恢复观察时接最新帧；2DGS 保留双尺度。独立 GPU 样本验证了自由导航、

@@ -21,7 +21,11 @@
 </p>
 
 <p align="center">
-  <a href="README_RELEASE.md#简体中文"><strong>获取 Windows 预览版</strong></a> ·
+  <a href="https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe"><strong>下载 Windows x64 安装包（.exe）</strong></a> ·
+  <a href="README_RELEASE.md#简体中文">安装说明</a>
+</p>
+
+<p align="center">
   <a href="docs/README.md">文档</a> ·
   <a href="CHANGELOG.zh-CN.md">更新日志</a> ·
   <a href="native/README.md">源码构建</a> ·
