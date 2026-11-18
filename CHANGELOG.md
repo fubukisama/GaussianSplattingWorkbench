@@ -21,6 +21,15 @@ in the same change, with affected capabilities, limitations and verification or
 delivery status. Implementation, verification, publication and installation remain
 separate claims.
 
+## 2026-11-18
+
+- **Experimental:** [LichtFeld training-preview projection](docs/LICHTFELD_VISUALIZATION.md)
+  adds an opt-in 3DGS viewport path with the ported covariance projection and
+  screen extent limit. The choice resets on exit; training, original models,
+  exports, 2DGS and Full Mip-Splatting keep their existing paths. This source
+  change does not deliver the full LS renderer or a verified GPU release.
+  [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/c0560be52a28187867c9cbbb1602c150ff6e70da)
+
 ## 2026-11-17
 
 - **Changed:** The [native updater](docs/NATIVE_UPDATES.md) checks silently about

@@ -17,6 +17,14 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 以后新增、修改或修复面向用户的功能，必须在同一变更中同步更新三语日志，写明影响能力、
 限制及验证或交付状态。“已实现、已验证、已发布、已安装”分别记录，不相互替代。
 
+## 2026-11-18
+
+- **实验功能：**[LichtFeld 训练预览投影](docs/LICHTFELD_VISUALIZATION.md)
+  为兼容的 3DGS 训练观察提供可选的移植投影与覆盖范围限制。默认关闭，退出不保留。
+  不修改训练、原模型或导出；2DGS 和 Full Mip-Splatting 保留原生路线。这是第一段源码
+  移植，尚不是完整 LS 渲染器或已通过 GPU 实训验收的安装版。
+  [源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/c0560be52a28187867c9cbbb1602c150ff6e70da)
+
 ## 2026-11-17
 
 - **更改：**[原生软件更新](docs/NATIVE_UPDATES.md)在启动约 10 秒后静默检查，

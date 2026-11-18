@@ -19,6 +19,14 @@ Gaussian Splatting Workbench の利用者向け変更を新しい順に記録し
 対象機能、制限、検証または配布状況を記載します。実装・検証・公開・インストールは
 それぞれ別の状態として扱います。
 
+## 2026-11-18
+
+- **実験機能：**[LichtFeld 学習プレビュー投影](docs/LICHTFELD_VISUALIZATION.md)に
+  対応する 3DGS の投影と描画範囲制限を追加しました。既定は無効で、終了後は保持
+  しません。学習、元のモデル、書き出し、2DGS、完全な Mip-Splatting の従来経路は
+  変更しません。ソース移植の初期段階であり、LS 描画全体や実 GPU で検証した配布版ではありません。
+  [ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/c0560be52a28187867c9cbbb1602c150ff6e70da)
+
 ## 2026-11-17
 
 - **変更：**[ネイティブ版の更新](docs/NATIVE_UPDATES.md)を起動の約 10 秒後に
