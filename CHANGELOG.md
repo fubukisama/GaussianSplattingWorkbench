@@ -22,6 +22,11 @@ separate claims.
 
 ## 2026-11-18
 
+- **Fixed:** The Windows native package includes the worker module needed by
+  live 3DGS and 2DGS training previews. An isolated package import check now
+  runs before the native build, and the final installer checks still run.
+  [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/9c6b00ce898c97761359c48e52a1cb436cfddfb3)
+
 - **Fixed:** On Windows, reconnecting to a live batch and requesting pause or
   cancellation now briefly retry a sharing conflict while reading the batch
   lease. The new read still checks the worker and session identities; an
