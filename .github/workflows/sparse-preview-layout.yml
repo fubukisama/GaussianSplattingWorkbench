@@ -1,0 +1,92 @@
+name: Sparse preview window layout
+on:
+  workflow_dispatch:
+    inputs:
+      native_run:
+        description: Successful Native Windows main run that produced the portable application
+        required: true
+        default: '44260387085'
+      source:
+        description: Exact native source commit (not the diagnostic workflow commit)
+        required: true
+        default: '390847cdc1238db7a1025eb417672e9c4dac95bf'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  sparse:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      NATIVE_RUN: ${{ inputs.native_run }}
+      NATIVE_SOURCE: ${{ inputs.source }}
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Bind the package to a successful main build; create a fresh test workspace
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:GITHUB_REF -ne 'refs/heads/main') { throw 'Hosted main only.' }
+          if ($env:NATIVE_RUN -notmatch '^[0-9]+$' -or $env:NATIVE_SOURCE -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid build identity.' }
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:NATIVE_RUN" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $run.path -cne '.github/workflows/native-windows.yml' -or
+              $run.head_repository.full_name -cne $env:GITHUB_REPOSITORY -or $run.head_branch -cne 'main' -or
+              $run.event -notin @('push','workflow_dispatch') -or $run.head_sha -cne $env:NATIVE_SOURCE -or $run.conclusion -cne 'success') { throw 'Unverified native build.' }
+          $drive = if (Test-Path 'D:/') { 'D:/' } else { $env:RUNNER_TEMP }
+          $root = Join-Path $drive ("sj" + $env:GITHUB_RUN_ID + '-' + $env:GITHUB_RUN_ATTEMPT)
+          if (Test-Path -LiteralPath $root) { throw 'Workspace must be fresh.' }
+          New-Item -ItemType Directory -Path $root,"$root/evidence","$root/tmp" | Out-Null
+          "root=$root" >> $env:GITHUB_OUTPUT
+          "SJ_ROOT=$root" >> $env:GITHUB_ENV
+          "TEMP=$root/tmp" >> $env:GITHUB_ENV
+          "TMP=$root/tmp" >> $env:GITHUB_ENV
+      - uses: actions/download-artifact@v8
+        with:
+          name: Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64
+          run-id: ${{ inputs.native_run }}
+          github-token: ${{ github.token }}
+          path: ${{ steps.scope.outputs.root }}/app
+          digest-mismatch: error
+      - uses: actions/setup-python@v6
+        id: python
+        with:
+          python-version: '3.12'
+      - name: Verify package, prepare synthetic views, CPU mapper and display
+        env:
+          QA_PY: ${{ steps.python.outputs.python-path }}
+        run: |
+          $r = $env:SJ_ROOT
+          & $env:QA_PY -I -B scripts/verify_native_artifact.py --root "$r/app" --output "$r/evidence/package.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Package readback failed.' }
+          $hash = (Get-FileHash -LiteralPath "$r/app/bin/Gaussian Scene Workbench.exe").Hash.ToLowerInvariant()
+          if ($env:NATIVE_SOURCE -eq '390847cdc1238db7a1025eb417672e9c4dac95bf' -and
+              $hash -ne '0c9a750d339d3df554ed141b552ae2da14a1c0922c6858a830228f4808af9fcc') { throw 'Not the released executable.' }
+          & $env:QA_PY -m venv "$r/py"
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to create isolated Python.' }
+          $py = "$r/py/Scripts/python.exe"
+          & $py -m pip install --no-input --no-cache-dir numpy==2.2.6 opencv-python-headless==4.12.0.88 plyfile==1.1.3 Pillow==11.0.0 pywinauto==0.6.8 comtypes==1.4.8 pywin32==308
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to provision diagnostic dependencies.' }
+          & $py -I -B native/tests/generate_colmap_training_fixture.py --output-dir "$r/fixture" --views 16 --width 800 --height 600
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to generate views.' }
+          ./scripts/install_colmap.ps1 -InstallRoot "$r/cm" -Variant nocuda -Version '4.1.0' -ExpectedSha256 dc8179bb4f3f48edec683bcec7627176b66e53a33ef0e2aa98d487f45873af5f
+          ./scripts/setup_native_ci_display.ps1
+          ./scripts/setup_native_ci_graphics.ps1 -OutputDirectory "$r/gl"
+      - name: Measure the settled window, first sparse observation and subsequent frames
+        run: |
+          & "$env:SJ_ROOT/py/Scripts/python.exe" -I -B .github/scripts/sparse_preview_layout.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain geometry, focus categories and reconstruction counts only
+        if: always() && steps.scope.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: sparse-window-evidence
+          path: ${{ steps.scope.outputs.root }}/evidence/*.json
+          if-no-files-found: warn
+          retention-days: 14
