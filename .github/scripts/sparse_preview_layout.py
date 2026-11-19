@@ -151,11 +151,32 @@ def run(root, evidence):
         if baseline != geometry(): raise RuntimeError("Baseline did not settle before the task")
         evidence.update(baseline=baseline, toolbarBefore=row())
         if foreground() != "owned": raise RuntimeError("Refusing input to a foreign foreground")
-        main.type_keys("{F7}", set_foreground=False)
-        dialog = wait(lambda: match(windows(), name="COLMAP Sparse Reconstruction"), "reconstruction dialog")
-        go = wait(lambda: match(dialog.descendants(), name="Start Reconstruction", role="Button"), "start button")
-        if go.element_info.process_id != app.pid or not go.is_enabled(): raise RuntimeError("Cannot start owned task")
-        go.invoke()
+        def owned_controls():
+            # Qt exposes its modal QDialog as a child of the primary UIA Window
+            # on some runner builds, rather than as a second desktop child.
+            return [c for w in windows() for c in [w, *w.descendants()]
+                    if c.element_info.process_id == app.pid]
+        def click_owned(button):
+            if foreground() != "owned" or button.element_info.process_id != app.pid or not button.is_enabled():
+                raise RuntimeError("Cannot click a disabled or unowned control")
+            button.click_input()
+        def start_button():
+            return match(owned_controls(), name="Start Reconstruction", role="Button")
+        try:
+            controls = owned_controls()
+            trigger = next((c for c in controls if c.element_info.control_type == "Button"
+                            and "COLMAP" in c.element_info.name and c.is_visible()), None)
+            evidence["launchControl"] = [trigger.element_info.name, trigger.is_enabled()] if trigger else "F7"
+            if trigger: click_owned(trigger)
+            else: main.type_keys("{F7}", set_foreground=False)
+            click_owned(wait(start_button, "owned reconstruction dialog's Start button", 12))
+        except Exception:
+            evidence["ownedDialogDiagnosis"] = [
+                [c.element_info.control_type, c.element_info.name[:180], c.is_enabled()]
+                for c in owned_controls() if c.is_visible() and
+                c.element_info.control_type in ("Window", "Button", "Text", "TreeItem")
+            ][:120]
+            raise
         rows = evidence["samples"] = []
         rx = re.compile(r"COLMAP sparse point cloud updated: snapshot (\d+) [·.] ([\d,]+) points")
         highest, completed = 0, None
