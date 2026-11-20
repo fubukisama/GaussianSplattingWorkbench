@@ -41,6 +41,7 @@ CI 成果物やローカルプレビューの配布は、自動的に公開 Rele
   独立プレビューには表示中の疎点の部分集合、カメラ数、読み取り専用の状態を明示します。
   実ウィンドウの抽出失敗を修正し、フィルターとコンポーネントの識別子を明示的な文字列として保持します。
   閉じた画面や非表示の画面では遅延初期読込みと監視を開始せず、検証素材は明示したビルド用一時領域に配置します。
+  カメラの回帰検証は COLMAP のワールドからカメラへの規約を用い、中心・前方・上方向の数値を記録します。0.0001 の許容値は変更しません。
   [抽出処理の修正ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/68bc3b7a263e6f260f454eb0c1d2a5dc8e7bf0dc)。
   [行ごとの視点移動の保護](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/ae81c54508b7d17f1ae86831c72428805b95df65)。
   [実装ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6)。

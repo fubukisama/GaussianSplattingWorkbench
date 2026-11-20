@@ -81,7 +81,12 @@ bool runReconstructionReviewSmokeTest(const QString &python,const QString &backe
   locate->click();if(!check(wait([&]{return !dialog.busy()&&!viewport->orthographicProjection();}),"locate independently revalidates report identity before native navigation"))return false;
   const auto frame=orbitFrame(viewport->viewOrbitAngles());const auto center=viewport->viewTarget()+frame.cameraOffsetDirection*viewport->viewDistance();
   const auto wanted=viewport->sceneCoordinates().localFromGlobal({0,0,0});
-  if(!check((center-wanted).length()<.0001F&&(-frame.cameraOffsetDirection-QVector3D(0,0,1)).length()<.0001F&&(frame.upDirection-QVector3D(1,0,0)).length()<.0001F,"native camera center, forward and roll match independently computed COLMAP source pose"))return false;
+  // COLMAP stores world-to-camera q, not camera-to-world q. Here R_w2c is
+  // [[0,-1,0],[1,0,0],[0,0,1]], so R_c2w=transpose(R_w2c), and image-up
+  // is -column_Y(R_c2w)=(-1,0,0). This expectation is independent of the loader.
+  const QVector3D wantedUp(-1,0,0);const float centerError=(center-wanted).length(),forwardError=(-frame.cameraOffsetDirection-QVector3D(0,0,1)).length(),upError=(frame.upDirection-wantedUp).length();
+  std::fprintf(stderr,"Reconstruction review pose evidence: centerError=%.9g forwardError=%.9g upError=%.9g actualUp=(%.9g,%.9g,%.9g) expectedUp=(-1,0,0) tolerance=0.0001\n",double(centerError),double(forwardError),double(upError),double(frame.upDirection.x()),double(frame.upDirection.y()),double(frame.upDirection.z()));
+  if(!check(centerError<.0001F&&forwardError<.0001F&&upError<.0001F,"native camera center, forward and roll match independently computed COLMAP source pose"))return false;
   restore->click();if(!check((viewport->viewTarget()-target).length()<.0001F&&std::abs(viewport->viewDistance()-distance)<.0001F&&viewport->viewOrbitAngles()==angles&&viewport->orthographicProjection()==orthographic,"restore returns projection, target, orbit and distance"))return false;
   const QString originalLanguage=AppLanguage::current();const auto originalTheme=AppTheme::currentTheme();
   const int originalScale=QCoreApplication::instance()->property("gswUiScalePercent").toInt();

@@ -48,6 +48,8 @@ separate claims.
   explicit string identities instead of relying on an ambiguous Qt overload.
   Closing or hiding the review also suppresses deferred initial reads and polling;
   owned verification fixtures use explicit build-local temporary roots.
+  The camera regression uses COLMAP's world-to-camera convention and records
+  numeric center/forward/up evidence; its 0.0001 tolerance is unchanged.
   [Filter correction source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/68bc3b7a263e6f260f454eb0c1d2a5dc8e7bf0dc).
   [Row-navigation guard](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/ae81c54508b7d17f1ae86831c72428805b95df65).
   [Implementation source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6).
