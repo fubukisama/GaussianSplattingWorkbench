@@ -29,6 +29,8 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
   原数据，不改准入门槛、预设、续训及规范相机网格限制。含三语即时切换及有界异步读取。
   逐图误差、未支持的畸变相机定位仍不可用。见[范围与验收](docs/RECONSTRUCTION_QUALITY.md#read-only-image-review-2026-11-20)。
   此变更未公开发布，也未替换本机软件。
+  后续保护修正空目录的取消传播，歧义身份不冒报未注册，重查预览根目录链接，并将按需
+  解码限制为单图可取消队列；仍需对应源码的远端重验。
   [实现源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6)。
 
 ## 2026-11-18

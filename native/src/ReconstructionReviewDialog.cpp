@@ -26,9 +26,11 @@
 #include <QSplitter>
 #include <QStandardItemModel>
 #include <QTableView>
+#include <QThreadPool>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
+#include <atomic>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #endif
@@ -55,6 +57,16 @@ QString reasonText(const QString &code) {
 }
 bool containedFile(const QString &root,const QString &relative) {
   if(relative.isEmpty()||relative.contains(QLatin1Char('\\'))||relative.contains(QLatin1Char(':'))||QDir::isAbsolutePath(relative))return false;
+  QString ancestor=QDir(root).absolutePath();
+  for(;;) {
+    const QFileInfo info(ancestor);if(info.isSymLink())return false;
+#ifdef Q_OS_WIN
+    const DWORD attributes=GetFileAttributesW(reinterpret_cast<LPCWSTR>(ancestor.utf16()));
+    if(attributes!=INVALID_FILE_ATTRIBUTES&&(attributes&FILE_ATTRIBUTE_REPARSE_POINT))return false;
+#endif
+    const auto parent=info.absoluteDir().absolutePath();if(parent==ancestor)break;ancestor=parent;
+  }
+  if(QDir(root).canonicalPath().compare(QDir::cleanPath(root),Qt::CaseInsensitive)!=0)return false;
   QString path=root;
   for(const auto &part:relative.split(QLatin1Char('/'))) {
     if(part.isEmpty()||part==QStringLiteral(".")||part==QStringLiteral(".."))return false;
@@ -80,8 +92,9 @@ public:
 }
 class ReconstructionReviewDialog::State {
 public:
-  QString dataset,python,backend,camera,identity;QProcessEnvironment environment;
+  QString dataset,python,backend,camera,identity,modelDirectory;QProcessEnvironment environment;
   QJsonObject report;QProcess *process=nullptr;quint64 generation=0,imageGeneration=0;
+  QThreadPool *imagePool=nullptr;std::shared_ptr<std::atomic<quint64>> imageEpoch=std::make_shared<std::atomic<quint64>>(0);
   QByteArray output; bool pending=false,expired=false;
   QLabel *summary=nullptr,*groupInfo=nullptr,*details=nullptr,*image=nullptr;
   QComboBox *groups=nullptr,*filter=nullptr;QLineEdit *search=nullptr;
@@ -92,6 +105,7 @@ ReconstructionReviewDialog::ReconstructionReviewDialog(const QString &dataset,co
     const QProcessEnvironment &environment,const QString &camera,const QString &identity,QWidget *parent)
     :QDialog(parent),m(std::make_unique<State>()) {
   m->dataset=dataset;m->python=python;m->backend=backend;m->environment=environment;m->camera=camera;m->identity=identity;
+  m->imagePool=new QThreadPool(this);m->imagePool->setMaxThreadCount(1);
   setObjectName(QStringLiteral("reconstructionReviewDialog"));
   AppLanguage::bind(this,"windowTitle",AppLanguage::source("重建质检（只读）"));resize(1080,740);setMinimumSize(360,300);
   auto *layout=new QVBoxLayout(this);
@@ -134,7 +148,7 @@ ReconstructionReviewDialog::ReconstructionReviewDialog(const QString &dataset,co
 ReconstructionReviewDialog::~ReconstructionReviewDialog(){cancel();}
 QJsonObject ReconstructionReviewDialog::report()const{return m->report;}
 bool ReconstructionReviewDialog::busy()const{return m->pending;}
-void ReconstructionReviewDialog::cancel(){++m->generation;++m->imageGeneration;m->pending=false;if(m->process){m->process->disconnect(this);m->process->kill();m->process->deleteLater();m->process=nullptr;}}
+void ReconstructionReviewDialog::cancel(){++m->generation;++m->imageGeneration;m->imageEpoch->store(m->imageGeneration);m->imagePool->clear();m->pending=false;if(m->process){m->process->disconnect(this);m->process->kill();m->process->deleteLater();m->process=nullptr;}}
 void ReconstructionReviewDialog::hideEvent(QHideEvent *e){cancel();m->viewport->restoreSourceCameraView();QDialog::hideEvent(e);}
 void ReconstructionReviewDialog::resizeEvent(QResizeEvent *e){m->split->setOrientation(width()<760?Qt::Vertical:Qt::Horizontal);QDialog::resizeEvent(e);}
 bool ReconstructionReviewDialog::stale()const {
@@ -149,8 +163,9 @@ bool ReconstructionReviewDialog::stale()const {
   for(auto i=directories.begin();i!=directories.end();++i)if(QFileInfo(QDir(root).filePath(i.key())).lastModified().toMSecsSinceEpoch()!=i.value().toString().toLongLong()/1000000)return true;
   return false;
 }
-void ReconstructionReviewDialog::invalidate(){m->expired=true;++m->imageGeneration;m->image->clear();m->locate->setEnabled(false);m->photo->setEnabled(false);m->viewport->restoreSourceCameraView();m->viewport->setEnabled(false);refreshLanguage();}
+void ReconstructionReviewDialog::invalidate(){m->expired=true;++m->imageGeneration;m->imageEpoch->store(m->imageGeneration);m->imagePool->clear();m->image->clear();m->locate->setEnabled(false);m->photo->setEnabled(false);m->viewport->restoreSourceCameraView();m->viewport->setEnabled(false);refreshLanguage();}
 void ReconstructionReviewDialog::inspect(const QString &group){m->expired=false;request(group);}
+void ReconstructionReviewDialog::setModelDirectory(const QString &directory){cancel();m->modelDirectory=directory;m->report={};}
 void ReconstructionReviewDialog::request(const QString &group,const QString &action,const QString &rowId) {
   cancel();m->pending=true;m->output.clear();m->locate->setEnabled(false);m->photo->setEnabled(false);refreshLanguage();
   const auto generation=m->generation;const QString expected=m->report.value(QStringLiteral("identity")).toString();
@@ -159,6 +174,7 @@ void ReconstructionReviewDialog::request(const QString &group,const QString &act
   if(!group.isEmpty())args<<QStringLiteral("--group")<<group;
   if(!m->camera.isEmpty())args<<QStringLiteral("--camera-dataset")<<m->camera;
   if(!m->identity.isEmpty())args<<QStringLiteral("--expected-identity")<<m->identity;
+  if(!m->modelDirectory.isEmpty())args<<QStringLiteral("--model-directory")<<m->modelDirectory;
   process->setProgram(m->python);process->setArguments(args);
   connect(process,&QProcess::readyReadStandardOutput,this,[this,process,generation]{if(generation!=m->generation)return;m->output+=process->readAllStandardOutput();if(m->output.size()>32*1024*1024){cancel();invalidate();emit inspectionFinished();}});
   connect(process,&QProcess::readyReadStandardError,this,[process]{process->readAllStandardError();});
@@ -216,17 +232,19 @@ void ReconstructionReviewDialog::loadImage(bool fullSize) {
   const auto row=m->proxy->index(m->table->currentIndex().row(),0).data(Qt::UserRole).toJsonObject();
   const QString relative=row.value(QStringLiteral("imagePath")).toString(),root=m->report.value(QStringLiteral("dataset")).toString();if(relative.isEmpty())return;
   QString expected;for(const auto &v:m->report.value(QStringLiteral("snapshots")).toArray()){const auto s=v.toObject();if(s.value(QStringLiteral("path"))==relative)expected=s.value(QStringLiteral("sha256")).toString();}
-  const auto generation=++m->imageGeneration;auto *watcher=new QFutureWatcher<QImage>(this);
+  const auto generation=++m->imageGeneration;const auto epoch=m->imageEpoch;epoch->store(generation);m->imagePool->clear();auto *watcher=new QFutureWatcher<QImage>(this);
   connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,generation,fullSize,relative]{const auto image=watcher->result();watcher->deleteLater();if(generation!=m->imageGeneration||m->expired||!isVisible())return;
     if(image.isNull()){m->image->setText(text(AppLanguage::source("原图不可读、已变化或超过预览预算。")));return;}
     if(!fullSize){m->image->setPixmap(QPixmap::fromImage(image));return;}
     QDialog viewer(this);viewer.setWindowTitle(relative);auto *layout=new QVBoxLayout(&viewer);auto *label=new QLabel(&viewer);label->setPixmap(QPixmap::fromImage(image));label->setAlignment(Qt::AlignCenter);layout->addWidget(label);viewer.resize(image.size().boundedTo(QSize(1280,900)));viewer.exec();
   });
-  watcher->setFuture(QtConcurrent::run([root,relative,expected,fullSize]{
+  watcher->setFuture(QtConcurrent::run(m->imagePool,[root,relative,expected,fullSize,epoch,generation]{
+    const auto cancelled=[&]{return epoch->load()!=generation;};if(cancelled())return QImage();
     if(expected.size()!=64||!containedFile(root,relative))return QImage();QFile file(QDir(root).filePath(relative));
     if(!file.open(QIODevice::ReadOnly)||file.size()>256*1024*1024)return QImage();QCryptographicHash hash(QCryptographicHash::Sha256);
-    if(!hash.addData(&file)||QString::fromLatin1(hash.result().toHex())!=expected||!file.seek(0))return QImage();
-    QImageReader reader(&file);reader.setAutoTransform(true);const auto size=reader.size();if(!size.isValid()||qint64(size.width())*size.height()>100000000)return QImage();
+    while(!file.atEnd()){if(cancelled())return QImage();const auto block=file.read(1024*1024);if(block.isEmpty()&&file.error()!=QFile::NoError)return QImage();hash.addData(block);}
+    if(cancelled()||QString::fromLatin1(hash.result().toHex())!=expected||!containedFile(root,relative)||!file.seek(0))return QImage();
+    QImageReader reader(&file);reader.setAutoTransform(true);const auto size=reader.size();if(!size.isValid()||qint64(size.width())*size.height()>64000000)return QImage();
     reader.setScaledSize(size.scaled(fullSize?QSize(1280,900):QSize(240,160),Qt::KeepAspectRatio));return reader.read();
   }));
 }

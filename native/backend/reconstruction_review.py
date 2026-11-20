@@ -84,6 +84,7 @@ class Inspection:
         return path
 
     def images(self, folder):
+        self.check()
         path = safe_path(self.root, folder)
         if not path.is_dir():
             self.files[folder] = dict(path=folder, missing=True)
@@ -116,6 +117,8 @@ class Inspection:
                     elif item.suffix.lower() in quality.IMAGE_EXTENSIONS:
                         self.capture(item, MAX_HASH_BYTES)
                         found[relative_name(name)] = item.relative_to(self.root).as_posix()
+                except InterruptedError:
+                    raise
                 except (OSError, ValueError) as exc:
                     issues.append(dict(name=name, code=str(exc)))
         return found, issues
@@ -247,6 +250,7 @@ def review_dataset(dataset, group=None, camera_dataset=None, expected_identity=N
             raise ValueError("linked_path_refused")
     root = root.resolve()
     inspection = Inspection(root, cancelled)
+    inspection.check()
     report = dict(schema="gsw.reconstruction_review/1", version=1, ready=True, dataset=str(root),
                   originalSource="input", originalAvailable=False, trainingStatus="not_prepared",
                   originalCount=None, registeredCount=None, unregisteredCount=None, trainingCount=None,
@@ -307,6 +311,8 @@ def review_dataset(dataset, group=None, camera_dataset=None, expected_identity=N
                     declared[name] = archive
                 originals, complete = declared, True
                 report["originalSource"] = "source/metadata_manifest.json"
+        except InterruptedError:
+            raise
         except (OSError, ValueError, KeyError, TypeError) as exc:
             report["issues"].append(dict(code="original_manifest_unverifiable", diagnostic=str(exc)))
         report.update(originalAvailable=complete, originalCount=len(originals) if complete else None)
@@ -343,6 +349,8 @@ def review_dataset(dataset, group=None, camera_dataset=None, expected_identity=N
                             meanReprojectionError=admission["meanReprojectionError"] if admission["validPoints"] else None,
                             usable=admission["usable"], reasons=admission["reasons"], cameraCount=count, format=extension)
                 records_by_group[gid], point_sets[gid] = rows, points
+            except InterruptedError:
+                raise
             except (OSError, ValueError, KeyError, IndexError, struct.error) as exc:
                 item["diagnostic"] = str(exc)
             report["groups"].append(item)
@@ -387,7 +395,8 @@ def review_dataset(dataset, group=None, camera_dataset=None, expected_identity=N
                     if row["imagePath"]:
                         row.update(pose=record["pose"], poseReason=record["poseReason"])
             except ValueError as exc:
-                row.update(status="conflict", pose=None, poseReason=str(exc), imagePath=None)
+                row.update(status="conflict", registered=None, training=None,
+                           pose=None, poseReason=str(exc), imagePath=None)
             report["rows"].append(row)
         report["points"] = point_sets.get(selected, [])
         report["registeredCount"] = len(current) if current is not None else None
@@ -407,4 +416,45 @@ def review_dataset(dataset, group=None, camera_dataset=None, expected_identity=N
     identity = dict(dataset=str(root), group=report.get("selectedGroup"), files=report["snapshots"],
                     directories=report["directories"])
     report["identity"] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    return report
+
+
+def review_model(model_directory, group=None, camera_dataset=None, cancelled=None):
+    """Review the selected mesh input's declared source, never the active project
+    by coincidence. Reuse the mesh reader's literal-only cfg_args contract.
+    """
+    from native.worker.mesh_generation import _validate_configuration
+    root = Path(model_directory).absolute()
+    for entry in (root, *root.parents):
+        if entry.is_symlink() or (entry.exists() and getattr(entry.lstat(), "st_file_attributes", 0) & 0x400):
+            raise ValueError("linked_path_refused")
+    root = root.resolve()
+    inspection = Inspection(root, cancelled)
+    cfg = inspection.capture(root / "cfg_args", 256 * 1024)
+    if cfg is None:
+        raise ValueError("model_source_unverifiable")
+    values = _validate_configuration(cfg)
+    source = values.get("source_path")
+    if not isinstance(source, str) or not source.strip() or not Path(source).is_absolute():
+        raise ValueError("model_source_unverifiable")
+    contract = inspection.json(root / "training-camera-contract.json")
+    expected = None
+    if contract is not None:
+        if contract.get("schema") != "gsw.training_camera_contract/1" or not camera_dataset:
+            raise ValueError("original_camera_dataset_required")
+        expected = contract.get("input_data_identity")
+        if not isinstance(expected, str) or len(expected) != 64:
+            raise ValueError("model_source_unverifiable")
+        source = str(Path(camera_dataset).absolute().parent)
+    elif camera_dataset:
+        raise ValueError("model_camera_binding_unverifiable")
+    report = review_dataset(source, group, camera_dataset, expected, cancelled)
+    before = {name: dict(item) for name, item in inspection.files.items()}
+    for name in before:
+        inspection.capture(safe_path(root, name))
+    if inspection.files != before:
+        raise ValueError("source_changed")
+    report["modelSource"] = dict(root=str(root), files=list(inspection.files.values()))
+    report["identity"] = hashlib.sha256(json.dumps(dict(datasetIdentity=report["identity"],
+        modelSource=report["modelSource"]), sort_keys=True).encode()).hexdigest()
     return report

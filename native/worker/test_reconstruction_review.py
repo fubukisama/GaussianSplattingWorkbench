@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from native.backend.reconstruction_review import review_dataset
+from native.backend.reconstruction_review import review_dataset, review_model
 
 
 def model(root, names, binary=False, roll=False):
@@ -110,18 +110,20 @@ class ReconstructionReviewTests(unittest.TestCase):
     def test_nested_same_basename_does_not_match_and_case_alias_is_conflict(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            for name in ("a/same.png", "b/same.png", "A/other.png", "a/OTHER.png"):
+            for name in ("a/same.png", "b/same.png", "a/other.png"):
                 path = root / "input" / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"raw")
-            # On Windows the last two names may alias; ambiguity against the
-            # registered spelling is still detected, independently of FS casing.
-            model(root / "sparse/0", ["a/same.png", "a/other.png"])
+            # Model spelling differs from the actual directory entry even on
+            # Windows, where creating two case-only aliases produces one file.
+            model(root / "sparse/0", ["a/same.png", "A/OTHER.png"])
             report = review_dataset(root)
             rows = {r["name"]: r for r in report["rows"]}
             self.assertEqual(rows["b/same.png"]["registered"], False)
             self.assertIsNotNone(rows["a/same.png"]["pose"])
             self.assertTrue(any(r["status"] == "conflict" for r in report["rows"]))
+            self.assertTrue(all(r["registered"] is None and r["training"] is None
+                                for r in report["rows"] if r["status"] == "conflict"))
 
     def test_escaping_names_cannot_preview_or_navigate_and_unknown_group_refused(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -205,6 +207,26 @@ class ReconstructionReviewTests(unittest.TestCase):
             report = review_dataset(root)
             self.assertIsNone(report["groups"][0]["meanReprojectionError"])
             self.assertTrue(all(r["pose"] is None for r in report["rows"]))
+
+    def test_mesh_review_follows_selected_model_source_not_an_unrelated_workspace(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            dataset, output = root / "dataset", root / "output"
+            dataset.mkdir()
+            fixture(dataset)
+            output.mkdir()
+            (output / "cfg_args").write_text("Namespace(source_path={!r}, images='images')".format(str(dataset)))
+            before = files(root)
+            report = review_model(output)
+            self.assertEqual(report["dataset"], str(dataset.resolve()))
+            self.assertEqual(report["originalCount"], 9)
+            self.assertEqual(files(root), before)
+            (output / "cfg_args").write_text("Namespace(source_path=__import__('os').getcwd())")
+            with self.assertRaises(ValueError):
+                review_model(output)
+            (output / "cfg_args").write_text("Namespace(source_path='relative-maybe-wrong')")
+            with self.assertRaisesRegex(ValueError, "model_source_unverifiable"):
+                review_model(output)
 
 
 if __name__ == "__main__":

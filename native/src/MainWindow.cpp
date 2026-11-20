@@ -7344,9 +7344,14 @@ void MainWindow::startMeshGeneration() {
   dialog.setCameraDatasetPath(mWorkspace.cameraDatasetPath());
   connect(&dialog, &MeshGenerationDialog::reconstructionReviewRequested, this, [this, &dialog, python, root] {
     const auto environment = pythonProcessEnvironment(python);
-    if (!environment.ready()) return;
-    ReconstructionReviewDialog review(mWorkspace.datasetPath(), python, root, environment.environment,
-        mWorkspace.cameraDatasetPath(), mWorkspace.cameraDatasetIdentity(), &dialog);
+    if (!environment.ready()) {
+      showError(QCoreApplication::translate("Workbench", "Python 运行环境不可用"), runtimeComponentEnvironmentError(environment));
+      return;
+    }
+    const auto config=dialog.configuration();
+    ReconstructionReviewDialog review({}, python, root, environment.environment,
+        config.value(QStringLiteral("cameraDatasetPath")).toString(), {}, &dialog);
+    review.setModelDirectory(config.value(QStringLiteral("modelDirectory")).toString());
     review.exec();
   });
   if (dialog.exec() != QDialog::Accepted) return;

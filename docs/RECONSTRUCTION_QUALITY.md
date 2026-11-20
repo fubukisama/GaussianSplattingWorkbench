@@ -6,6 +6,11 @@ Use **Review reconstruction** beside the training-source summary (shared by
 3DGS and 2DGS), or the same entry in the mesh/depth/texture dialog. It launches
 only `native/worker/reconstruction_review.py`, not a training worker, COLMAP,
 mesh generation, or source recovery. Closing cancels that inspection process.
+The mesh entry reads the selected model's bounded, literal-only `cfg_args`
+source reference using the existing mesh metadata reader, not whichever dataset
+happens to be active in the project. Unknown/relative references are refused.
+Canonical model inputs additionally require the selected original camera dataset
+to match the stored `input_data_identity`; inspection never relaxes mesh support.
 
 The original list comes from the bounded recursive `input` tree. If unavailable,
 an existing import manifest can enumerate archived photos only when every record
@@ -49,6 +54,9 @@ Changed sources expire the report and disable actions. Closing/superseding a
 request invalidates late process/image callbacks. Viewing uses no CUDA. Limits:
 20,000 images/views, 128 components, 256 MiB per model file, 2 GiB hashed input,
 12,000 display-only sparse points, 32 MiB report and 30-second helper deadline.
+Photo previews use one cancellable decode queue, at most 256 MiB encoded bytes
+and 64 million source pixels; decoder allocation limits still apply. The image
+is display-scaled to at most 1280 × 900, and only one image is decoded at a time.
 Oversized sources stop with an unavailable report, not a partial quality pass.
 
 Locked camera/transforms sources keep train/val/test membership and report SfM

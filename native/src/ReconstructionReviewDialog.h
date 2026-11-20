@@ -14,6 +14,7 @@ public:
   [[nodiscard]] QJsonObject report() const;
   [[nodiscard]] bool busy() const;
   void inspect(const QString &group = {});
+  void setModelDirectory(const QString &directory);
 signals:
   void inspectionFinished();
 protected:

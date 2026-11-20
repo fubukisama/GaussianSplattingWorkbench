@@ -37,6 +37,9 @@ separate claims.
   unsupported distorted-camera navigation remain unavailable. See
   [scope and acceptance](docs/RECONSTRUCTION_QUALITY.md#read-only-image-review-2026-11-20).
   No public release or local installation is performed by this change.
+  Follow-up guards propagate cancellation even before files exist, keep ambiguous
+  case-fold identities unknown, recheck preview-root links and serialize on-demand
+  image decoding. Exact-source remote retesting is required.
   [Implementation source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6).
 
 ## 2026-11-18
