@@ -35,7 +35,11 @@ def axes(image):
         lines = cv2.HoughLinesP(mask.astype("uint8"), 1, np.pi/360, 30,
                                 minLineLength=int(.17*w), maxLineGap=12)
         candidates = []
-        for x1, y1, x2, y2 in ([] if lines is None else lines[:, 0]):
+        for segment in ([] if lines is None else lines[:, 0]):
+            # Convert OpenCV/NumPy values at the measurement boundary. Keeping
+            # numpy.float64 here also makes the eventual comparison a numpy.bool_,
+            # which used to erase the entire real-window report in finally.
+            x1, y1, x2, y2 = map(int, segment)
             dx, dy = float(x2-x1), float(y2-y1)
             if abs(dx) < .14*w or not .08 < abs(dy/dx) < 3:
                 continue
@@ -188,6 +192,8 @@ def run(root, evidence):
             generation, count = (int(shots[-1][0]), int(shots[-1][1].replace(",", ""))) if shots else (0, 0)
             a = axes(stable["view"].capture_as_image()) if generation and foreground() == "owned" else {}
             rows.append(dict(t=ts(), generation=generation, points=count, axes=a, geometry=g))
+            if g != baseline and "toolbarAtFirstChange" not in evidence:
+                evidence["toolbarAtFirstChange"] = row()
             if generation != highest:
                 print("Displayed sparse observation", generation, count, g["view"], a, flush=True)
                 highest = generation
@@ -233,7 +239,7 @@ def run(root, evidence):
             ys = [axes_by_gen[n][k][0] for n in axes_by_gen if k in axes_by_gen[n]]
             if len(ys) >= 2: spans[k] = round(max(ys)-min(ys), 2)
         evidence["axisSpanPx"] = spans
-        evidence["gridStable"] = max(spans.values()) <= 3 if spans else None
+        evidence["gridStable"] = max(spans.values()) <= 3 if set(spans) == {"x", "y"} else None
         print("Observed layout change:", evidence.get("firstChange"), "grid span:", spans, flush=True)
         if evidence["gridStable"] is None: return "INCONCLUSIVE_GRID" if not changed else "REFLOW_GRID_UNMEASURED"
         return "PASS" if not changed and evidence["gridStable"] else "REPRODUCED"
@@ -257,6 +263,6 @@ if __name__ == "__main__":
         data["error"] = str(exc)
         raise
     finally:
-        (root/"evidence"/"layout.json").write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
+        (root/"evidence"/"layout.json").write_text(json.dumps(data, separators=(",", ":"), allow_nan=False), encoding="utf-8")
     print(data["result"])
     sys.exit(0 if data["result"] == "PASS" else 1)
