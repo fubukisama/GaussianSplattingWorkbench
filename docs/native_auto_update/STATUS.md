@@ -12,6 +12,41 @@ fullAcceptance, a public release or production signing/channel authority.
 See the [three-language preview handoff](PREVIEW_E141_20261030.md) for exact
 source, archive digest, local readback and unfinished gates.
 
+## Restricted first installation (2026-11-20)
+
+The last failing job in the November 13 updater run now passes. The full
+[Native Auto Update run 44689230561, attempt 1](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/44689230561)
+passed **10/10 jobs** on a push of `347ebe2ecd75ec2e62728931c7f9d6be13f08423`
+(tree `0dc8a75ca5a64d0b50bef6528b2370d6d1f0fa3f`). This is the source tested below.
+
+- **Fresh install:** In the [restricted Windows job](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/44689230561/job/136130783016),
+  the medium-integrity client, with no enabled administrator group or discoverable
+  developer tools, downloaded the signed test archive once and returned
+  `BOOTSTRAP_COMMITTED` (exit 0). Independent readback checked the active pointer,
+  online receipt, 7 bootstrap files and 34 version files against the expected bytes.
+- **First launch:** After the refusal checks, the installed stable launcher started
+  the executable in the installed `fixture-a` slot. Its Qt window was shown, its
+  viewport painted, and the process exited normally. This is a separate launch
+  observation; the restricted-token evidence above belongs to the installer.
+- **Refusals:** An occupied destination was preserved. A changed bootstrap manifest,
+  wrong signing key, forbidden archive redirect and corrupt archive each returned
+  exit 2 without creating a destination or leaving a staging directory. The wrong
+  key was rejected before any archive request; the valid installation stayed intact.
+
+The [first-install evidence ZIP](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/44689230561/artifacts/14607379785)
+has SHA-256 `069b9aba96abac20f7d8cb710c18d86fe57fab5c6297473d00f8687e2c21277e`;
+the installed fixture EXE has SHA-256 `879237ba452db295073e5b0d8e0f6bb9ec1ddf747f6f44751097ec28edf0c85a`.
+A [separate automatic-update job](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/44689230561/job/136130783057)
+showed the same stable entry starting B after A's normal exit, with user data
+unchanged. These are isolated Qt fixtures, not a production publisher signature,
+a physical clean OS, protocol-1 migration, or a change to the locally installed app.
+
+中文：隔离 Windows 已验证非管理员首装、从固定入口实际打开窗口，以及坏包不留下可用安装。
+这不是正式发布，也未替换本机版本。
+
+日本語：隔離した Windows 環境で、管理者権限なしの新規インストール、固定ランチャーからの
+実ウィンドウの起動、不正なパッケージの拒否を確認しました。本番配信や既存環境の更新ではありません。
+
 ## Signed automatic TLS diagnosis — 2026-11-13
 
 The [original failure](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/41045738943)
@@ -95,16 +130,16 @@ The same restricted token and private desktop in the diagnostic reproduced
 at `9d60f1c58ad257c57db8ab96ff6ce8a504931475`, the detached process reached
 main and returned `BOOTSTRAP_NOT_IMPLEMENTED` (exit 2), with the original
 restricted medium-integrity identity, no administrator or developer tooling,
-and no target mutation. The `BOOTSTRAP_COMMITTED` assertion remains **FAIL**;
-this is now a missing install implementation, not a pre-main loader failure.
+and no target mutation. At that commit the `BOOTSTRAP_COMMITTED` assertion
+still failed: the installer was unimplemented, not blocked before main.
 Artifact `14021818124` has outer SHA-256
 `fde60eac1e961342dfa9334cf21789153a712191fc42ea7c05b4f1d62252f83d`.
 No first installation, migration, production signing, or local delivery is
 inferred. See [Windows process creation flags](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags)
 and [Python TLS shutdown](https://docs.python.org/3.12/library/ssl.html#ssl.SSLSocket.unwrap).
 
-中文：Schannel 完整下载、断流续传和拒绝未受信证书已通过。受限首装端点已能启动，但安装仍未实现。
-日本語：Schannel の完全なダウンロード、切断後の再開、未信頼証明書の拒否は合格。制限付き初回導入は起動できましたが、インストールは未実装です。
+中文：在 11 月 13 日的版本中，Schannel 完整下载、断流续传和拒绝未受信证书已通过。受限首装端点能启动，但当时还没有安装实现。
+日本語：11 月 13 日時点で、Schannel の完全なダウンロード、切断後の再開、未信頼証明書の拒否は合格。制限付き初回導入は起動できましたが、インストールは当時未実装でした。
 
 | Evidence | Exact source | Result | Scope |
 | --- | --- | --- | --- |
@@ -147,8 +182,8 @@ launcher/helper, but its scope is explicitly not the formal GSW renderer or
 3DGS/2DGS full optimizer-state training acceptance. No such quality or backend
 claim is inferred from a lifecycle or UI test.
 
-Applicable isolated gaps remain separate from public authorization: authenticated
-first-install implementation/bootstrap migration,
+Applicable isolated gaps remain separate from public authorization: the remaining
+first-install path/platform matrix and authenticated migration of existing bootstraps,
 interrupted prepared-state restart recovery, concurrent capacity loss, permanently hung-helper
 close and remaining full matrices. Real contention/termination, bounded resource
 cases, Qt/CPU continuity and the test-root recovery chooser have scoped GREEN

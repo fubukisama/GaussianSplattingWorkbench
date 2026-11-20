@@ -91,6 +91,7 @@ changed-manifest, wrong-signature, unapproved-redirect and corrupted-download
 refusals. This is not Authenticode or
 public release acceptance, a physical clean OS test, or evidence of protocol-1
 migration. No production pin, signing key or public feed is provided here.
+See the [verified run, artifact digest and per-case results](STATUS.md#restricted-first-installation-2026-11-20).
 
 远端作业只验证隔离测试身份、完整文件和真实 Qt 夹具窗口，不代表签名发行、物理净机
 验收或旧安装迁移；本变更不提供生产引导 pin、签名密钥或公开更新源。
