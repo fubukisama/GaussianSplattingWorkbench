@@ -11,6 +11,10 @@ source reference using the existing mesh metadata reader, not whichever dataset
 happens to be active in the project. Unknown/relative references are refused.
 Canonical model inputs additionally require the selected original camera dataset
 to match the stored `input_data_identity`; inspection never relaxes mesh support.
+Legacy model configurations with evaluation splitting or a custom image directory
+do not receive an inferred training count: without a verified execution manifest
+that membership is unavailable. Locked-camera validation is not labeled as a
+passed SfM minimum-viability check.
 
 The original list comes from the bounded recursive `input` tree. If unavailable,
 an existing import manifest can enumerate archived photos only when every record

@@ -449,6 +449,14 @@ def review_model(model_directory, group=None, camera_dataset=None, cancelled=Non
     elif camera_dataset:
         raise ValueError("model_camera_binding_unverifiable")
     report = review_dataset(source, group, camera_dataset, expected, cancelled)
+    # A legacy model may have an evaluation split or a non-default image root.
+    # Without an execution-bound training manifest, do not label every registered
+    # view as a sampled training view or guess a backend's held-out policy.
+    if contract is None and (values.get("eval", False) is not False or
+                             values.get("images", "images") not in (None, "images")):
+        report.update(trainingStatus="unverifiable_training_policy", trainingCount=None)
+        for row in report["rows"]:
+            row.update(training=None, split=None)
     before = {name: dict(item) for name, item in inspection.files.items()}
     for name in before:
         inspection.capture(safe_path(root, name))

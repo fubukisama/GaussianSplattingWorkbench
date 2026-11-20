@@ -50,6 +50,8 @@ separate claims.
   owned verification fixtures use explicit build-local temporary roots.
   The camera regression uses COLMAP's world-to-camera convention and records
   numeric center/forward/up evidence; its 0.0001 tolerance is unchanged.
+  Locked inputs mark SfM admission as not applicable. Legacy evaluation/custom
+  image policies without a verified training manifest retain unknown membership.
   [Filter correction source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/68bc3b7a263e6f260f454eb0c1d2a5dc8e7bf0dc).
   [Row-navigation guard](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/ae81c54508b7d17f1ae86831c72428805b95df65).
   [Implementation source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6).

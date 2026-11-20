@@ -37,6 +37,7 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
   修正真实窗口筛选失败：筛选项和分组项显式保存字符串身份，不依赖有歧义的 Qt 重载。
   关闭或隐藏质检后不再触发延迟初检或轮询；验收夹具使用显式构建临时目录。
   相机回归按 COLMAP 世界到相机约定计算期望，并记录中心、朝向、上方向数值；0.0001 容差不变。
+  锁定相机的 SfM 准入标为不适用；旧模型有评估划分或自定义图像目录而缺少可信训练清单时，不推断训练成员。
   [筛选修正源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/68bc3b7a263e6f260f454eb0c1d2a5dc8e7bf0dc)。
   [逐行导航保护](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/ae81c54508b7d17f1ae86831c72428805b95df65)。
   [实现源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6)。

@@ -231,6 +231,11 @@ class ReconstructionReviewTests(unittest.TestCase):
             self.assertEqual(report["dataset"], str(dataset.resolve()))
             self.assertEqual(report["originalCount"], 9)
             self.assertEqual(files(root), before)
+            (output / "cfg_args").write_text("Namespace(source_path={!r}, eval=True)".format(str(dataset)))
+            held_out = review_model(output)
+            self.assertIsNone(held_out["trainingCount"])
+            self.assertEqual(held_out["trainingStatus"], "unverifiable_training_policy")
+            self.assertTrue(all(r["training"] is None and r["split"] is None for r in held_out["rows"]))
             (output / "cfg_args").write_text("Namespace(source_path=__import__('os').getcwd())")
             with self.assertRaises(ValueError):
                 review_model(output)
