@@ -8,7 +8,9 @@
 #include "ViewportGridSettings.h"
 #include "WorkspaceDocument.h"
 #include "../tests/UiFormVisualProbe.h"
+#include "../tests/GridControlEvidence.h"
 
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -40,6 +42,7 @@
 #include <QSettings>
 #include <QStandardItemModel>
 #include <QTemporaryDir>
+#include <QTextDocument>
 #include <QTimer>
 #include <QToolButton>
 #include <QWheelEvent>
@@ -568,6 +571,108 @@ std::optional<GridInk> actualGridInk(NativeViewport &viewport, WorkspaceDocument
   return ink;
 }
 } // namespace
+
+bool runGridControlEvidence(MainWindow &window) {
+  auto *viewport = window.findChild<NativeViewport *>();
+  auto *document = window.findChild<WorkspaceDocument *>();
+  auto *grid = window.findChild<QAction *>(QStringLiteral("viewportGridSettingsAction"));
+  auto *details = window.findChild<QAction *>(QStringLiteral("viewportDetailsAction"));
+  auto *console = window.findChild<QPlainTextEdit *>(QStringLiteral("taskConsole"));
+  const QString root = qEnvironmentVariable("GSW_GRID_CONTROLS_OUTPUT");
+  if (!check(qEnvironmentVariable("GITHUB_ACTIONS") == QStringLiteral("true") &&
+      !qApp->property("gswSmokeSettingsDirectory").toString().isEmpty() &&
+      QDir::isAbsolutePath(root) && !QDir(root).exists() && QDir().mkpath(root) &&
+      viewport && document && grid && details && console, "fresh owned remote grid-control fixture")) return false;
+  QTemporaryDir fixture(QDir(root).filePath(QStringLiteral("work-XXXXXX")));
+  QString error;
+  const QString path = QDir(fixture.path()).filePath(QStringLiteral("metres.ply"));
+  if (!check(fixture.isValid() && writeFixture(path, QByteArrayLiteral("m")) &&
+      document->createUntitled(fixture.path(), {}, &error) && document->addScenePath(path, &error) &&
+      waitUntil([&] { return viewport->scenePath() == path && viewport->selectableModelAvailable(); }, 7000),
+      "real grid actions and owned metric PLY")) return false;
+  const QString original = AppLanguage::current();
+  const auto cleanup = qScopeGuard([&] { AppLanguage::apply(original, false); });
+  const auto expose = [](QDialog &dialog) {
+    if (!dialog.screen()) return false;
+    const QRect available = dialog.screen()->availableGeometry();
+    const QSize fit = dialog.size().boundedTo(available.size() - QSize(56, 100));
+    dialog.resize(fit);
+    dialog.move(available.center() - QPoint(fit.width() / 2, fit.height() / 2));
+    // Only this explicitly isolated Actions smoke may activate its own dialog.
+    dialog.raise();
+    dialog.activateWindow();
+    return waitUntil([&] { return dialog.isActiveWindow() && dialog.windowHandle() &&
+        dialog.windowHandle()->isExposed(); }, 3000);
+  };
+  for (const QString &locale : {QStringLiteral("zh_CN"), QStringLiteral("en_US"), QStringLiteral("ja_JP")}) {
+    if (!AppLanguage::apply(locale, false)) return false;
+    QDir out(QDir(root).filePath(locale));
+    if (!QDir().mkpath(out.absolutePath())) return false;
+    const Snapshot before(*document, *viewport);
+    QJsonObject facts{{QStringLiteral("locale"), locale},
+        {QStringLiteral("theme"), qApp->property("gswUiTheme").toString()},
+        {QStringLiteral("source"), qEnvironmentVariable("GITHUB_SHA")}};
+    if (!dialogExercise(window, "viewportGridDialog", [&] { grid->trigger(); }, [&](QDialog &dialog) {
+      GridControls c(dialog);
+      if (!c.valid() || !expose(dialog)) return false;
+      c.grid->setFocus(Qt::TabFocusReason); // Just the starting point, not the Tab result.
+      dispatchFor(80);
+      if (!check(c.grid->hasFocus() && c.grid->isChecked() && c.axes->isChecked() &&
+          c.mode->currentData().toInt() == static_cast<int>(Settings::SpacingMode::Automatic) &&
+          c.density->isEnabled(), "public initial grid state")) return false;
+      facts.insert(QStringLiteral("dpr"), dialog.devicePixelRatioF());
+      facts.insert(QStringLiteral("size"), QJsonArray{dialog.width(), dialog.height()});
+      facts.insert(QStringLiteral("regions"), QJsonObject{
+          {"grid", grid_qa::indicator(dialog, *c.grid)}, {"axes", grid_qa::indicator(dialog, *c.axes)},
+          {"mode", grid_qa::arrow(dialog, *c.mode)}, {"subdivisions", grid_qa::arrow(dialog, *c.subdivisions)},
+          {"unit", grid_qa::arrow(dialog, *c.unit)}, {"up", grid_qa::step(dialog, *c.density, QStyle::SC_SpinBoxUp)},
+          {"down", grid_qa::step(dialog, *c.density, QStyle::SC_SpinBoxDown)}});
+      if (!grid_qa::screenshot(dialog, out, QStringLiteral("grid-on.png"))) return false;
+      const bool unchecked = grid_qa::key(Qt::Key_Space) && !c.grid->isChecked();
+      dispatchFor(80);
+      if (!grid_qa::screenshot(dialog, out, QStringLiteral("grid-off.png"))) return false;
+      const bool restored = grid_qa::key(Qt::Key_Space) && c.grid->isChecked();
+      const bool tabAxes = grid_qa::key(Qt::Key_Tab) && c.axes->hasFocus();
+      const bool tabMode = grid_qa::key(Qt::Key_Tab) && c.mode->hasFocus();
+      const int originalMode = c.mode->currentIndex();
+      const bool opened = grid_qa::key(Qt::Key_Down, Qt::AltModifier) &&
+          waitUntil([&] { return c.mode->view()->isVisible(); }, 1000);
+      const bool dismissed = opened && grid_qa::key(Qt::Key_Escape) &&
+          waitUntil([&] { return !c.mode->view()->isVisible() && c.mode->hasFocus(); }, 1000) &&
+          c.mode->currentIndex() == originalMode;
+      const bool fixed = dismissed && grid_qa::key(Qt::Key_End) &&
+          c.mode->currentData().toInt() == static_cast<int>(Settings::SpacingMode::Fixed) && !c.density->isEnabled();
+      const bool automatic = fixed && grid_qa::key(Qt::Key_Home) &&
+          c.mode->currentIndex() == originalMode && c.density->isEnabled();
+      c.density->setFocus(Qt::TabFocusReason);
+      const double originalDensity = c.density->value();
+      const bool up = grid_qa::key(Qt::Key_Up) && near(c.density->value(), originalDensity + c.density->singleStep());
+      const bool down = grid_qa::key(Qt::Key_Down) && near(c.density->value(), originalDensity);
+      facts.insert(QStringLiteral("keyboard"), QJsonObject{
+          {"spaceOff", unchecked}, {"spaceOn", restored}, {"tabToAxes", tabAxes}, {"tabToMode", tabMode},
+          {"openPopup", opened}, {"escapePopup", dismissed}, {"endFixed", fixed}, {"homeAuto", automatic},
+          {"stepUp", up}, {"stepDown", down}});
+      c.cancel->click();
+      return true;
+    })) return false;
+    facts.insert(QStringLiteral("cancelPreservedState"), before.unchanged(*document, *viewport));
+    if (!dialogExercise(window, "viewportDetailsDialog", [&] { details->trigger(); }, [&](QDialog &dialog) {
+      auto *plain = dialog.findChild<QPlainTextEdit *>(QStringLiteral("viewportDetailsText"));
+      if (!plain || !expose(dialog)) return false;
+      dispatchFor(80);
+      facts.insert(QStringLiteral("bodyFont"), grid_qa::fontFacts(dialog.font(), dialog));
+      facts.insert(QStringLiteral("detailsFont"), grid_qa::fontFacts(plain->document()->defaultFont(), *plain));
+      console->ensurePolished();
+      facts.insert(QStringLiteral("rawLogFont"), grid_qa::fontFacts(console->document()->defaultFont(), *console));
+      facts.insert(QStringLiteral("detailsTextIntact"), plain->isReadOnly() &&
+          plain->toPlainText() == viewport->viewportDetailsText() && !plain->toPlainText().isEmpty());
+      return grid_qa::screenshot(dialog, out, QStringLiteral("details.png")) && closeDetails(dialog);
+    })) return false;
+    if (!grid_qa::writeFacts(out, facts) || !before.unchanged(*document, *viewport)) return false;
+    qInfo() << "GRID_CONTROLS_OBSERVED" << locale << facts["theme"] << facts["dpr"] << facts["keyboard"];
+  }
+  return true;
+}
 
 bool runViewportStatusControlsSmokeTest(MainWindow &window) {
   auto *viewport = window.findChild<NativeViewport *>();

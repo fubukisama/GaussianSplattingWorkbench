@@ -14,6 +14,7 @@ on:
           - project-only
           - ci-repair
           - lichtfeld-preview
+          - grid-controls
 
 permissions:
   contents: read
@@ -123,6 +124,9 @@ jobs:
           elseif ($env:GSW_STATUS_SCOPE -eq 'lichtfeld-preview') {
             $targets += @('GaussianSceneWorkbench', 'gsw_lichtfeld_footprint_tests')
           }
+          elseif ($env:GSW_STATUS_SCOPE -eq 'grid-controls') {
+            $targets += @('GaussianSceneWorkbench')
+          }
           elseif ($env:GSW_STATUS_SCOPE -ne 'project-only') { throw 'Unknown contract group.' }
           cmake --build native/build-viewport-status --config Release --parallel --target $targets 2>&1 |
             Tee-Object -FilePath native/viewport-status-artifact/build.log
@@ -158,7 +162,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Original pause acknowledgement failed under repetition; boundary diagnostics retained.' }
 
       - name: Verify existing cadence and actual window scheduling
-        if: ${{ !cancelled() && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
+        if: ${{ !cancelled() && inputs.contract_scope != 'grid-controls' && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
         shell: pwsh
         run: |
           $contracts = '^(native_viewport_scheduling_(light|dark)|native_viewport_locale_contract|frame_rate_counter|recovery_store|viewport_camera)$'
@@ -177,6 +181,26 @@ jobs:
             --output-junit (Join-Path $PWD 'native/viewport-status-artifact/status-contracts.xml') `
             -R $contracts @repeat
           if ($LASTEXITCODE -ne 0) { throw 'Viewport status contracts failed; existing assertions and deadlines remain unchanged.' }
+
+      - name: Measure grid controls, keyboard and prose in exposed real windows
+        if: ${{ !cancelled() && inputs.contract_scope == 'grid-controls' && steps.focused-build.outcome == 'success' && steps.focused-graphics.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $root = Join-Path $PWD 'native/viewport-status-artifact/grid-controls'
+          New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
+          $env:QT_SCALE_FACTOR_ROUNDING_POLICY = 'PassThrough'
+          $bad = @()
+          foreach ($scale in '1','1.25','1.5','1.75','2') {
+            $env:QT_SCALE_FACTOR = $scale
+            foreach ($theme in 'light','dark') {
+              $profile = "$scale-$theme"
+              $env:GSW_GRID_CONTROLS_OUTPUT = Join-Path $root $profile
+              ctest --test-dir native/build-viewport-status -C Release --no-tests=error --verbose --output-on-failure --output-log "$root/$profile.log" -R "^native_viewport_scheduling_${theme}$"
+              if ($LASTEXITCODE) { $bad += $profile }
+            }
+          }
+          & '${{ steps.qa-python.outputs.python-path }}' -I -B .github/scripts/check_grid_control_ink.py --root $root --source $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0 -or $bad.Count) { throw "Grid control contract failed; retain every capture and exit status: $($bad -join ', ')" }
 
       - name: Retain exact source status logs and screenshots
         if: always()

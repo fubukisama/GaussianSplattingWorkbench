@@ -276,6 +276,7 @@ bool livePerformanceLabelRegression(MainWindow &window, NativeViewport &viewport
 }
 
 bool runViewportSchedulingSmokeTest(MainWindow &window) {
+  if (qEnvironmentVariableIsSet("GSW_GRID_CONTROLS_OUTPUT")) return runGridControlEvidence(window);
   auto *viewport = window.findChild<NativeViewport *>();
   auto *document = window.findChild<WorkspaceDocument *>();
   auto *showFps = window.findChild<QAction *>(QStringLiteral("showViewportFrameRateAction"));
