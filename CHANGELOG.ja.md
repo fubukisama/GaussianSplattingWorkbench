@@ -30,6 +30,7 @@ CI 成果物やローカルプレビューの配布は、自動的に公開 Rele
   対応。画像ごとの誤差と未対応の歪みカメラの視点移動は利用できません。
   [範囲と検証](docs/RECONSTRUCTION_QUALITY.md#read-only-image-review-2026-11-20)を参照。
   この変更では公開リリースやローカルの置換は行いません。
+  [実装ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6)。
 
 ## 2026-11-18
 

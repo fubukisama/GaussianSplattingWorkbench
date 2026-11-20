@@ -34,6 +34,7 @@ separate claims.
   unsupported distorted-camera navigation remain unavailable. See
   [scope and acceptance](docs/RECONSTRUCTION_QUALITY.md#read-only-image-review-2026-11-20).
   No public release or local installation is performed by this change.
+  [Implementation source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6).
 
 ## 2026-11-18
 
