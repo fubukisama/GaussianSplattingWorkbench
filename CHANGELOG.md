@@ -46,6 +46,8 @@ separate claims.
   The isolated preview labels its displayed sparse subset and camera count as read-only.
   Corrected the real-window filter failure: filter/component controls now retain
   explicit string identities instead of relying on an ambiguous Qt overload.
+  Closing or hiding the review also suppresses deferred initial reads and polling;
+  owned verification fixtures use explicit build-local temporary roots.
   [Filter correction source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/68bc3b7a263e6f260f454eb0c1d2a5dc8e7bf0dc).
   [Row-navigation guard](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/ae81c54508b7d17f1ae86831c72428805b95df65).
   [Implementation source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6).

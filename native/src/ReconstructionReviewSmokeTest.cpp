@@ -46,7 +46,9 @@ bool fixture(const QString &root){QDir dir(root);if(!dir.mkpath(QString::fromUtf
 }
 }
 bool runReconstructionReviewSmokeTest(const QString &python,const QString &backend) {
-  QTemporaryDir temp;if(!temp.isValid()||!fixture(temp.path()))return false;
+  const auto fixtureRoot=qEnvironmentVariable("GSW_RECONSTRUCTION_REVIEW_ROOT",QDir(backend).filePath(QStringLiteral(".tmp/reconstruction-review-fixtures")));
+  if(!QDir().mkpath(fixtureRoot))return false;
+  QTemporaryDir temp(QDir(fixtureRoot).filePath(QStringLiteral("source-XXXXXX")));if(!temp.isValid()||!fixture(temp.path()))return false;
   const auto before=snapshot(temp.path());
   ReconstructionReviewDialog dialog(temp.path(),python,backend,QProcessEnvironment::systemEnvironment());dialog.show();
   if(!check(wait([&]{return !dialog.busy()&&dialog.report().value(QStringLiteral("ready")).toBool();}),"real read-only process returns a report"))return false;
@@ -68,7 +70,7 @@ bool runReconstructionReviewSmokeTest(const QString &python,const QString &backe
   if(!check(!viewport->setSourceCameraView(0)&&viewport->viewTarget()==originalTarget,"the generic first-camera shortcut cannot bypass review-row identity checks"))return false;
   if(!check(!locate->isEnabled()&&photo->isEnabled()&&wait([&]{return !thumb->pixmap().isNull();}),"unregistered original previews without a camera pose"))return false;
   if(!check(thumb->pixmap().toImage().pixelColor(0,0)==QColor(64,140,180),"thumbnail reads the selected third original's independent color, not the prepared subset"))return false;
-  bool originalOpened=false;QTimer photoCloser;photoCloser.setInterval(10);QObject::connect(&photoCloser,&QTimer::timeout,&dialog,[&]{auto *viewer=dialog.findChild<QDialog*>(QStringLiteral("reviewOriginalImageDialog"));if(!viewer)return;const auto *image=viewer->findChild<QLabel*>();originalOpened=image&&!image->pixmap().isNull()&&image->pixmap().toImage().pixelColor(0,0)==QColor(64,140,180)&&viewer->property("reviewOriginalPath")==QString::fromUtf8("input/写真/frame2.png");viewer->reject();photoCloser.stop();});photoCloser.start();photo->click();
+  bool originalOpened=false;QTimer photoCloser;photoCloser.setInterval(10);QObject::connect(&photoCloser,&QTimer::timeout,&dialog,[&]{auto *viewer=dialog.findChild<QDialog*>(QStringLiteral("reviewOriginalImageDialog"));if(!viewer)return;const auto *image=viewer->findChild<QLabel*>(QStringLiteral("reviewOriginalImagePixels"));originalOpened=image&&!image->pixmap().isNull()&&image->pixmap().toImage().pixelColor(0,0)==QColor(64,140,180)&&viewer->property("reviewOriginalPath")==QString::fromUtf8("input/写真/frame2.png");viewer->reject();photoCloser.stop();});photoCloser.start();photo->click();
   if(!check(wait([&]{return originalOpened;}),"View Original opens the actual selected original in an owned native image window"))return false;photoCloser.stop();
   QMetaObject::invokeMethod(table,"doubleClicked",Qt::DirectConnection,Q_ARG(QModelIndex,table->model()->index(0,0)));
   if(!check(viewport->viewTarget()==originalTarget,"double click on an unregistered image cannot move the camera"))return false;
@@ -101,7 +103,7 @@ bool runReconstructionReviewSmokeTest(const QString &python,const QString &backe
   // hide cancel old QProcess/image callbacks, even when delivered late.
   ReconstructionReviewDialog cancelled(temp.path(),python,backend,QProcessEnvironment::systemEnvironment());cancelled.show();cancelled.inspect(QStringLiteral("sparse/0"));cancelled.close();QApplication::processEvents();
   if(!check(!cancelled.busy(),"closing cancels the read-only helper and invalidates late callbacks"))return false;
-  QTemporaryDir otherRoot;if(!otherRoot.isValid()||!fixture(otherRoot.path()))return false;
+  QTemporaryDir otherRoot(QDir(fixtureRoot).filePath(QStringLiteral("other-XXXXXX")));if(!otherRoot.isValid()||!fixture(otherRoot.path()))return false;
   for(int i=3;i<9;++i)if(!QFile::remove(QDir(otherRoot.path()).filePath(QString::fromUtf8("input/写真/frame%1.png").arg(i))))return false;
   ReconstructionReviewDialog other(otherRoot.path(),python,backend,QProcessEnvironment::systemEnvironment());other.show();
   if(!check(wait([&]{return !other.busy()&&other.report().value(QStringLiteral("ready")).toBool();})&&other.report().value(QStringLiteral("originalCount")).toInt()==3&&QDir::cleanPath(other.report().value(QStringLiteral("dataset")).toString())==QDir::cleanPath(otherRoot.path()),"new project context cannot adopt the closed inspection's nine-image response"))return false;

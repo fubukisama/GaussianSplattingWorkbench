@@ -30,7 +30,8 @@ class ReconstructionQualityTests(unittest.TestCase):
     def test_read_only_review_does_not_change_the_existing_two_view_admission_gate(self):
         from native.backend import reconstruction_quality as quality
         from native.backend.reconstruction_review import review_dataset
-        with tempfile.TemporaryDirectory() as tmp:
+        from native.worker.test_reconstruction_review import temporary_directory
+        with temporary_directory() as tmp:
             root = Path(tmp)
             (root / "input").mkdir()
             for i in range(9):

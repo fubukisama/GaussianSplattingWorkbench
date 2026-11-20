@@ -142,8 +142,8 @@ ReconstructionReviewDialog::ReconstructionReviewDialog(const QString &dataset,co
   connect(m->table,&QTableView::doubleClicked,this,[this]{locate();});connect(m->locate,&QPushButton::clicked,this,&ReconstructionReviewDialog::locate);
   connect(m->restore,&QPushButton::clicked,m->viewport,&NativeViewport::restoreSourceCameraView);connect(m->photo,&QPushButton::clicked,this,[this]{loadImage(true);});
   AppLanguage::onChanged(this,[this]{refreshLanguage();});
-  auto *timer=new QTimer(this);connect(timer,&QTimer::timeout,this,[this]{if(!m->pending&&!m->report.isEmpty()&&stale())invalidate();});timer->start(2000);
-  refreshLanguage();QTimer::singleShot(0,this,[this]{inspect();});
+  auto *timer=new QTimer(this);connect(timer,&QTimer::timeout,this,[this]{if(isVisible()&&!m->pending&&!m->report.isEmpty()&&stale())invalidate();});timer->start(2000);
+  refreshLanguage();QTimer::singleShot(0,this,[this]{if(isVisible())inspect();});
 }
 ReconstructionReviewDialog::~ReconstructionReviewDialog(){cancel();}
 QJsonObject ReconstructionReviewDialog::report()const{return m->report;}
@@ -238,7 +238,7 @@ void ReconstructionReviewDialog::loadImage(bool fullSize) {
   connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,generation,fullSize,relative]{const auto image=watcher->result();watcher->deleteLater();if(generation!=m->imageGeneration||m->expired||!isVisible())return;
     if(image.isNull()){m->image->setText(text(AppLanguage::source("原图不可读、已变化或超过预览预算。")));return;}
     if(!fullSize){m->image->setPixmap(QPixmap::fromImage(image));return;}
-    QDialog viewer(this);viewer.setObjectName(QStringLiteral("reviewOriginalImageDialog"));viewer.setProperty("reviewOriginalPath",relative);viewer.setWindowTitle(relative);auto *layout=new QVBoxLayout(&viewer);auto *label=new QLabel(&viewer);label->setPixmap(QPixmap::fromImage(image));label->setAlignment(Qt::AlignCenter);layout->addWidget(label);viewer.resize(image.size().boundedTo(QSize(1280,900)));viewer.exec();
+    QDialog viewer(this);viewer.setObjectName(QStringLiteral("reviewOriginalImageDialog"));viewer.setProperty("reviewOriginalPath",relative);viewer.setWindowTitle(relative);auto *layout=new QVBoxLayout(&viewer);auto *label=new QLabel(&viewer);label->setObjectName(QStringLiteral("reviewOriginalImagePixels"));label->setPixmap(QPixmap::fromImage(image));label->setAlignment(Qt::AlignCenter);layout->addWidget(label);viewer.resize(image.size().boundedTo(QSize(1280,900)));viewer.exec();
   });
   watcher->setFuture(QtConcurrent::run(m->imagePool,[root,relative,expected,fullSize,epoch,generation]{
     const auto cancelled=[&]{return epoch->load()!=generation;};if(cancelled())return QImage();

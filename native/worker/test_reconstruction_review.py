@@ -1,6 +1,7 @@
 """Owned inputs only. Assertions are independent of review's reported counters."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
 import tempfile
@@ -8,6 +9,15 @@ import unittest
 from unittest.mock import patch
 
 from native.backend.reconstruction_review import review_dataset, review_model
+
+
+def temporary_directory():
+    # CI supplies its build-local root. Standalone runs stay in the checkout's
+    # existing fixture area rather than falling back to the OS system TEMP.
+    root = Path(os.environ.get("GSW_RECONSTRUCTION_REVIEW_ROOT") or
+                Path(__file__).resolve().parents[2] / ".tmp" / "reconstruction-review-fixtures")
+    root.mkdir(parents=True, exist_ok=True)
+    return tempfile.TemporaryDirectory(dir=root)
 
 
 def model(root, names, binary=False, roll=False):
@@ -52,7 +62,7 @@ def fixture(root, binary=False):
 class ReconstructionReviewTests(unittest.TestCase):
     def test_nine_originals_two_registered_are_separate_from_training_subset_and_other_group(self):
         for binary in (False, True):
-            with self.subTest(binary=binary), tempfile.TemporaryDirectory() as temp:
+            with self.subTest(binary=binary), temporary_directory() as temp:
                 root = Path(temp)
                 names = fixture(root, binary)
                 before = files(root)
@@ -78,7 +88,7 @@ class ReconstructionReviewTests(unittest.TestCase):
                 self.assertEqual(result["rows"][0]["pose"]["K"], [[50, 0, 32], [0, 55, 24], [0, 0, 1]])
 
     def test_missing_original_list_does_not_invent_seven_unregistered_rows(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_directory() as temp:
             root = Path(temp)
             model(root / "sparse/0", ["a.png", "b.png"])
             (root / "images").mkdir()
@@ -91,7 +101,7 @@ class ReconstructionReviewTests(unittest.TestCase):
             self.assertTrue(all(r["status"] == "missing" and r["pose"] is None for r in report["rows"]))
 
     def test_pre_reconstruction_and_corrupt_model_are_distinct_unknowns(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_directory() as temp:
             root = Path(temp)
             (root / "input").mkdir()
             (root / "input/a.png").write_bytes(b"raw")
@@ -108,7 +118,7 @@ class ReconstructionReviewTests(unittest.TestCase):
             self.assertEqual(bad["rows"][0]["status"], "unknown")
 
     def test_nested_same_basename_does_not_match_and_case_alias_is_conflict(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_directory() as temp:
             root = Path(temp)
             for name in ("a/same.png", "b/same.png", "a/other.png"):
                 path = root / "input" / name
@@ -126,7 +136,7 @@ class ReconstructionReviewTests(unittest.TestCase):
                                 for r in report["rows"] if r["status"] == "conflict"))
 
     def test_escaping_names_cannot_preview_or_navigate_and_unknown_group_refused(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_directory() as temp:
             root = Path(temp)
             fixture(root)
             (root / "sparse/0/images.txt").write_text("3 1 0 0 0 0 0 0 91 ../private.png\n\n")
@@ -139,7 +149,7 @@ class ReconstructionReviewTests(unittest.TestCase):
                 review_dataset(root, "../other")
 
     def test_file_and_group_mutations_change_identity_without_writes(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_directory() as temp:
             root = Path(temp)
             fixture(root)
             first = review_dataset(root)
@@ -151,7 +161,7 @@ class ReconstructionReviewTests(unittest.TestCase):
 
     def test_locked_transforms_keep_splits_without_claiming_sfm_registration(self):
         from PIL import Image
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_directory() as temp:
             root = Path(temp)
             for split in ("train", "val", "test"):
                 Image.new("RGB", (64, 48), "gray").save(root / (split + ".png"))
@@ -168,12 +178,12 @@ class ReconstructionReviewTests(unittest.TestCase):
             self.assertTrue(all(r["pose"] is not None for r in report["rows"]))
 
     def test_cancellation_is_observed_before_enumeration_or_hash(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_directory() as temp:
             with self.assertRaises(InterruptedError):
                 review_dataset(temp, cancelled=lambda: True)
 
     def test_archived_photo_manifest_can_enumerate_originals_but_video_count_cannot(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_directory() as temp:
             root = Path(temp)
             (root / "source/originals").mkdir(parents=True)
             (root / "source/originals/a.png").write_bytes(b"original")
@@ -189,7 +199,7 @@ class ReconstructionReviewTests(unittest.TestCase):
             self.assertEqual(report["rows"], [])
 
     def test_missing_prepared_image_invalidates_training_list_not_original_registration(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_directory() as temp:
             root = Path(temp)
             names = fixture(root)
             (root / "images" / names[0]).unlink()
@@ -200,7 +210,7 @@ class ReconstructionReviewTests(unittest.TestCase):
             self.assertEqual(report["trainingStatus"], "not_prepared")
 
     def test_changed_calibration_or_missing_model_never_becomes_zero_error(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_directory() as temp:
             root = Path(temp)
             fixture(root)
             (root / "sparse/0/cameras.txt").write_text("91 PINHOLE 64 48 nan 55 32 24\n")
@@ -209,7 +219,7 @@ class ReconstructionReviewTests(unittest.TestCase):
             self.assertTrue(all(r["pose"] is None for r in report["rows"]))
 
     def test_mesh_review_follows_selected_model_source_not_an_unrelated_workspace(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_directory() as temp:
             root = Path(temp)
             dataset, output = root / "dataset", root / "output"
             dataset.mkdir()

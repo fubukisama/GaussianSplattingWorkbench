@@ -72,6 +72,8 @@ jobs:
           cache-dependency-path: scripts/requirements-native-checks.txt
       - name: Install acceptance dependencies
         shell: pwsh
+        env:
+          GSW_RECONSTRUCTION_REVIEW_ROOT: ${{ github.workspace }}/native/reconstruction-review-fixtures
         run: |
           & '${{ steps.qa-python.outputs.python-path }}' -m pip install -r scripts/requirements-native-checks.txt
           if ($LASTEXITCODE -ne 0) { throw "Acceptance QA dependencies failed." }
