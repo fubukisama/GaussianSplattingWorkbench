@@ -54,7 +54,7 @@ def axes(image):
 def match(items, *, ident=None, name=None, role=None):
     for c in items:
         i = c.element_info
-        if ((not ident or i.automation_id.rsplit(".", 1)[-1] == ident)
+        if ((not ident or (i.automation_id or "").rsplit(".", 1)[-1] == ident)
                 and (not name or i.name.replace("&", "") == name)
                 and (not role or i.control_type == role) and c.is_visible()):
             return c
