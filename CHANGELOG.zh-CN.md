@@ -19,6 +19,9 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 
 ## 2026-11-20
 
+- **稀疏重建预览：**关联数据集时即显示场景工具栏，首张点云快照不会把视口和属性栏向下挤；尚不可用的编辑操作仍禁用。连续稀疏快照沿用第一张有效点云的网格基准，点云真实范围照常更新；仍可导航和切换到世界零平面。本条为源码变更，不代表已发布或安装。
+  [修复源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/6de4af73b99a8132f31eb333bd8db5e54bd0478c) · [回归诊断源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/fbecef12c4cf958a2660c1bf6cc9bd9ff8a918b6)
+
 - **新增（已实现；远端验收待完成）：**3DGS／2DGS 训练和适用网格／深度／贴图流程
   共用只读重建质检。分开核对原始输入、所查分组注册图和已验证训练清单，可筛未注册
   照片、查看原图及切换可核验分组。有有效位姿时只在独立稀疏预览中定位并可返回，

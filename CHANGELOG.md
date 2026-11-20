@@ -22,6 +22,9 @@ separate claims.
 
 ## 2026-11-20
 
+- **Sparse reconstruction preview:** The scene toolbar row is present once a dataset is attached, so the first point snapshot does not push the viewport and inspector down. Unavailable editing actions stay disabled. Successive sparse snapshots keep the first valid cloud's grid datum without freezing measured point bounds, navigation or the world-zero option. This source change is not a release or installation.
+  [Fix source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/6de4af73b99a8132f31eb333bd8db5e54bd0478c) · [Regression probe source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/fbecef12c4cf958a2660c1bf6cc9bd9ff8a918b6)
+
 - **Added (implementation; remote acceptance pending):** Read-only reconstruction
   review in 3DGS/2DGS training and applicable mesh/depth/texture workflows. Original
   inputs, component registrations and verified training references are separate;
