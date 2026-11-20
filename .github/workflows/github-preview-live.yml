@@ -1,0 +1,106 @@
+name: Public preview live readback
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Exact already-pushed product commit to validate
+        type: string
+        required: true
+      phase:
+        description: Non-publishing CDN check, or readback of an already released preview
+        type: choice
+        options: [cdn, released]
+        default: cdn
+      native_run:
+        description: Successful exact-source Native Windows run (released phase only)
+        type: string
+        required: false
+permissions:
+  contents: read
+  actions: read
+jobs:
+  live-public-readback:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Validate readback identity
+        shell: pwsh
+        env:
+          SOURCE_ID: ${{ inputs.source }}
+          PHASE: ${{ inputs.phase }}
+          NATIVE_RUN: ${{ inputs.native_run }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if($env:GITHUB_REPOSITORY_ID -ne '1286130219' -or $env:SOURCE_ID -cnotmatch '^[0-9a-f]{40}$'){throw 'Unexpected readback source'}
+          if($env:PHASE -eq 'released'){
+            if($env:NATIVE_RUN -notmatch '^[1-9][0-9]{1,15}$'){throw 'Native Windows run is required'}
+            $run=gh api ('repos/'+$env:GITHUB_REPOSITORY+'/actions/runs/'+$env:NATIVE_RUN)|ConvertFrom-Json
+            if($run.repository.id -ne 1286130219 -or $run.head_repository.id -ne 1286130219 -or $run.head_sha -cne $env:SOURCE_ID -or $run.head_branch -ne 'main' -or $run.path -ne '.github/workflows/native-windows.yml' -or $run.event -ne 'push' -or $run.conclusion -ne 'success'){throw 'The exact full product run did not pass'}
+          }
+      - uses: actions/checkout@v7
+        with:
+          path: qa
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source }}
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Download known immutable public Windows bytes through the pinned production transport
+        shell: pwsh
+        run: |
+          cmake -S qa/.github/preview-acceptance -B D:/gsw-public-qa/probe -A x64 "-DGSW_PRODUCT_NATIVE=$PWD/product/native"
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          cmake --build D:/gsw-public-qa/probe --config Release --parallel 4
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          New-Item -ItemType Directory -Force -Path D:/gsw-public-qa/cdn,D:/gsw-public-qa/evidence | Out-Null
+          & D:/gsw-public-qa/probe/Release/preview_real_cdn.exe D:/gsw-public-qa/cdn | Tee-Object -FilePath D:/gsw-public-qa/evidence/cdn.log
+          exit $LASTEXITCODE
+      - uses: actions/download-artifact@v8
+        if: inputs.phase == 'released'
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.native_run }}
+          name: Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64
+          path: D:/gsw-public-qa/payload
+          digest-mismatch: error
+      - name: Build controlled preceding sequence with production transport (no test override)
+        if: inputs.phase == 'released'
+        shell: pwsh
+        run: |
+          $seq='product/native/github-preview-update/sequence.txt';$n=[long](Get-Content -Raw $seq)
+          [IO.File]::WriteAllText((Resolve-Path $seq).Path,([string]($n-1))+[Environment]::NewLine,[Text.Encoding]::ASCII)
+          if((@(git -C product diff --name-only) -join ',') -ne 'native/github-preview-update/sequence.txt'){throw 'Baseline changed beyond the controlled sequence decrement'}
+          cmake -S product/native/github-preview-update -B D:/gsw-public-qa/baseline -A x64 -DGSW_PREVIEW_ACCEPTANCE=OFF
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          cmake --build D:/gsw-public-qa/baseline --config Release --target gsw_github_preview_update --parallel 4
+          exit $LASTEXITCODE
+      - name: Set up the real remote desktop and graphics
+        if: inputs.phase == 'released'
+        shell: pwsh
+        run: |
+          ./product/scripts/setup_native_ci_display.ps1
+          ./product/scripts/setup_native_ci_graphics.ps1
+      - name: Upgrade both original installed entries from the actual public release
+        if: inputs.phase == 'released'
+        shell: pwsh
+        env:
+          EXPECTED_SOURCE: ${{ inputs.source }}
+        run: |
+          python -I -B qa/.github/preview-acceptance/verify_released.py --source product --payload D:/gsw-public-qa/payload --baseline 'D:/gsw-public-qa/baseline/Release/GSW GitHub Preview Update.exe' --root D:/gsw-public-qa/live --evidence D:/gsw-public-qa/evidence
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: live-public-preview-readback
+          path: D:/gsw-public-qa/evidence
+          if-no-files-found: warn
+          retention-days: 30
