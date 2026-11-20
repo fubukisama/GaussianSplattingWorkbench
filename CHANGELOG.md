@@ -22,6 +22,11 @@ separate claims.
 
 ## 2026-11-20
 
+- **Grid Settings and Viewport Details:** Check marks, drop-down arrows and numeric step arrows
+  use vector icons in the existing controls. Details now uses the interface font for the selected
+  language; raw task logs remain monospaced. Keyboard controls, model coordinates and grid values
+  are unchanged. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/b444467292723a0fe45e7692502ede69cd4c1cc7). Remote verification and desktop delivery are recorded separately.
+
 - **Windows preview updates:** Eligible Setup and unanchored managed installations can check this project's immutable GitHub Releases. With automatic download enabled, a verified newer preview is applied on normal exit; cancelling exit, a damaged package or a Windows policy refusal keeps the old version. Commercial Windows code signing is not required. The stable signed channel is unchanged. [Update guide](docs/NATIVE_UPDATES.md#github-preview)
 
 - **Sparse reconstruction preview:** The scene toolbar row is present once a dataset is attached, so the first point snapshot does not push the viewport and inspector down. Unavailable editing actions stay disabled. Successive sparse snapshots keep the first valid cloud's grid datum without freezing measured point bounds, navigation or the world-zero option. This source change is not a release or installation.
