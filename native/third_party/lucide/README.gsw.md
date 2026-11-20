@@ -5,5 +5,6 @@
 - Source files: upstream `icons/*.svg`; original SVG geometry is unmodified.
 - License: ISC, with the upstream Feather-derived subset under MIT. See the complete `LICENSE` file distributed with this directory and installed in `licenses/lucide`.
 - Integration: `native/lucide_icons.qrc` embeds the selected assets. `WorkbenchIcons` resolves `currentColor` to the current application palette at render time and caches the resolved SVG renderers. Default viewbox is 24 units with a 2-unit stroke.
+- Grid form indicators in `native/assets/form-marks/` adapt the checked-in `check.svg` and `chevron-left.svg` paths from the same revision. The latter is rotated up/down. A tighter view box, explicit light/dark/disabled ink and a slightly heavier stroke keep small Qt stylesheet indicators legible without a platform symbol font. The original assets and license file remain unchanged.
 - Scope: semantic desktop operation icons. The existing GSW application identity, native Windows caption controls, file-browser provider icons, and colored 3D axes remain unchanged.
 - Blender, CloudCompare, and Metashape are layout/interaction references only. No proprietary or GPL application artwork is included in this directory.

@@ -831,6 +831,19 @@ Editing-view orbit, temporary Ctrl+left orbit in trim tools, and the corner navi
 
 Terminology references: [CloudCompare official translations](https://github.com/CloudCompare/CloudCompare/tree/master/qCC/translations), [Agisoft official manuals](https://www.agisoft.com/downloads/user-manuals/), and [Blender Japanese manual](https://docs.blender.org/manual/ja/latest/). Application messages are original translations, not wholesale copies of another application's language library. Loading follows the official [QTranslator documentation](https://doc.qt.io/qt-6/qtranslator.html). Qt base catalogs remain upstream Qt assets; see `THIRD_PARTY_LICENSES.md`.
 
+## Grid control marks and detail text
+
+Grid Settings uses vector marks rather than font characters for checkboxes, drop-downs and
+spin buttons. Viewport Details uses the selected language's interface font; the raw task log
+remains monospaced. Keyboard actions, translated labels and numerical values are unchanged.
+
+中文：「网格设置」的勾号、下拉箭头和数值增减箭头使用矢量图形。「视口详情」使用当前语言的
+界面正文字体，原始任务日志仍使用等宽字体。键盘操作、界面译文和数值不变。
+
+日本語：「グリッド設定」のチェックマーク、ドロップダウンと数値の増減矢印はベクターで表示します。
+「ビューポートの詳細」は選択した言語の本文用フォントを使用し、生のタスクログは等幅フォントのままです。
+キー操作、訳文、数値は変わりません。
+
 ## Presented-frame metrics
 
 | English | 简体中文 | 日本語 |

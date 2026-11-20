@@ -64,4 +64,13 @@
     <file alias="view.svg">third_party/lucide/icons/view.svg</file>
     <file alias="x.svg">third_party/lucide/icons/x.svg</file>
   </qresource>
+  <qresource prefix="/icons/form-marks">
+    <file alias="checked.svg">assets/form-marks/checked.svg</file>
+    <file alias="up-light.svg">assets/form-marks/up-light.svg</file>
+    <file alias="down-light.svg">assets/form-marks/down-light.svg</file>
+    <file alias="up-dark.svg">assets/form-marks/up-dark.svg</file>
+    <file alias="down-dark.svg">assets/form-marks/down-dark.svg</file>
+    <file alias="up-disabled.svg">assets/form-marks/up-disabled.svg</file>
+    <file alias="down-disabled.svg">assets/form-marks/down-disabled.svg</file>
+  </qresource>
 </RCC>

@@ -8,6 +8,7 @@
 #include <QSettings>
 #include <QSize>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
 #include <QtMath>
 
@@ -22,6 +23,14 @@ constexpr int kMinimumScale = 90;
 constexpr int kMaximumScale = 150;
 constexpr int kDayStartHour = 6;
 constexpr int kNightStartHour = 18;
+
+QStringList bodyFontFamilies(const QString &language) {
+  if (language == QStringLiteral("ja_JP"))
+    return {QStringLiteral("Yu Gothic UI"), QStringLiteral("Meiryo"), QStringLiteral("Microsoft YaHei UI")};
+  if (language == QStringLiteral("en_US"))
+    return {QStringLiteral("Segoe UI"), QStringLiteral("Microsoft YaHei UI")};
+  return {QStringLiteral("Microsoft YaHei UI")};
+}
 
 struct ColorDefinition {
   UiColorRole role;
@@ -396,14 +405,9 @@ void AppTheme::apply(QApplication &application, const int scalePercent, const bo
   application.setProperty("gswUiThemeMode", themeModeName(currentThemeMode()));
   application.setProperty("gswUiTheme", themeName(theme));
   application.setPalette(palette(theme));
-  QFont font(QStringLiteral("Microsoft YaHei UI"));
-  const QString language = application.property("gswUiLanguage").toString();
-  if (language == QStringLiteral("ja_JP")) {
-    font.setFamilies({QStringLiteral("Yu Gothic UI"), QStringLiteral("Meiryo"),
-                      QStringLiteral("Microsoft YaHei UI")});
-  } else if (language == QStringLiteral("en_US")) {
-    font.setFamilies({QStringLiteral("Segoe UI"), QStringLiteral("Microsoft YaHei UI")});
-  }
+  const auto families = bodyFontFamilies(application.property("gswUiLanguage").toString());
+  QFont font(families.first());
+  font.setFamilies(families);
   font.setPointSizeF(10.0 * scale / 100.0);
   font.setStyleStrategy(QFont::PreferAntialias);
   application.setFont(font);
@@ -499,6 +503,37 @@ QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabl
   border-color: @DISABLED_BORDER@;
 }
 QComboBox::drop-down { border: 0; width: @COMBO_ARROW@px; }
+/* The grid dialog uses actual vector marks, not platform private-use glyphs.
+   Keep Qt's controls, focus traversal, subcontrol hit boxes and spin direction. */
+QDialog#viewportGridDialog QCheckBox::indicator {
+  width: @GRID_CHECK@px; height: @GRID_CHECK@px;
+  border: 1px solid @MUTED_TEXT@; border-radius: 3px; background: @FIELD@;
+}
+QDialog#viewportGridDialog QCheckBox::indicator:checked {
+  border-color: @ACCENT@; background: @ACCENT@; image: url(:/icons/form-marks/checked.svg);
+}
+QDialog#viewportGridDialog QCheckBox::indicator:unchecked:hover { border-color: @FOCUS@; }
+QDialog#viewportGridDialog QCheckBox::indicator:disabled { border-color: @DISABLED_BORDER@; background: @DISABLED_SURFACE@; }
+QDialog#viewportGridDialog QCheckBox::indicator:checked:disabled { background: @DISABLED_CHECK@; }
+QDialog#viewportGridDialog QComboBox::drop-down,
+QDialog#viewportGridDialog QDoubleSpinBox::up-button,
+QDialog#viewportGridDialog QDoubleSpinBox::down-button { border: none; background: transparent; }
+QDialog#viewportGridDialog QComboBox::down-arrow {
+  width: @GRID_COMBO_INK@px; height: @GRID_COMBO_INK@px; image: url(:/icons/form-marks/down-@MARK_THEME@.svg);
+}
+QDialog#viewportGridDialog QDoubleSpinBox::up-arrow {
+  width: @GRID_STEP_INK@px; height: @GRID_STEP_INK@px; image: url(:/icons/form-marks/up-@MARK_THEME@.svg);
+}
+QDialog#viewportGridDialog QDoubleSpinBox::down-arrow {
+  width: @GRID_STEP_INK@px; height: @GRID_STEP_INK@px; image: url(:/icons/form-marks/down-@MARK_THEME@.svg);
+}
+QDialog#viewportGridDialog QDoubleSpinBox::up-button:enabled:hover,
+QDialog#viewportGridDialog QDoubleSpinBox::down-button:enabled:hover { background: @HOVER@; }
+QDialog#viewportGridDialog QDoubleSpinBox::up-arrow:disabled,
+QDialog#viewportGridDialog QDoubleSpinBox::up-arrow:off { image: url(:/icons/form-marks/up-disabled.svg); }
+QDialog#viewportGridDialog QComboBox::down-arrow:disabled,
+QDialog#viewportGridDialog QDoubleSpinBox::down-arrow:disabled,
+QDialog#viewportGridDialog QDoubleSpinBox::down-arrow:off { image: url(:/icons/form-marks/down-disabled.svg); }
 QAbstractItemView {
   background: @ITEM_VIEW@;
   alternate-background-color: @ALTERNATE@;
@@ -583,6 +618,8 @@ QPlainTextEdit {
   border: 0;
   font-family: "Cascadia Mono", "Consolas";
 }
+/* Explanatory text is not a terminal. Keep the raw task console monospaced. */
+QPlainTextEdit#viewportDetailsText { font-family: @BODY_FAMILIES@; }
 QScrollBar:vertical { background: @ITEM_VIEW@; width: @SCROLL@px; margin: 0; }
 QScrollBar::handle:vertical { background: @SCROLL_HANDLE@; min-height: 24px; border-radius: 4px; }
 QScrollBar::handle:vertical:hover { background: @ACCENT@; }
@@ -647,6 +684,7 @@ QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOL
       {"@PRESSED@", UiColorRole::ActionPressed},
       {"@CHECKED@", UiColorRole::ActionTint},
       {"@ACCENT@", UiColorRole::Action},
+      {"@DISABLED_CHECK@", UiColorRole::DisabledSelection},
       {"@DISABLED_TEXT@", UiColorRole::DisabledText},
       {"@BUTTON@", UiColorRole::Button},
       {"@BUTTON_BORDER@", UiColorRole::ButtonLine},
@@ -683,6 +721,9 @@ QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOL
   for (const ColorToken &token : colors) {
     css.replace(QString::fromLatin1(token.token), color(theme, token.role).name());
   }
+  css.replace(QStringLiteral("@MARK_THEME@"), themeName(theme));
+  const auto families = bodyFontFamilies(qApp ? qApp->property("gswUiLanguage").toString() : QString{});
+  css.replace(QStringLiteral("@BODY_FAMILIES@"), QStringLiteral("\"%1\"").arg(families.join(QStringLiteral("\", \""))));
 
   const auto replace = [&css, scalePercent](const QString &token, const int baseValue) {
     css.replace(token, QString::number(AppTheme::scaled(baseValue, scalePercent)));
@@ -699,6 +740,9 @@ QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOL
   replace(QStringLiteral("@CONTROL_PAD@"), 10);
   replace(QStringLiteral("@INPUT_PAD@"), 7);
   replace(QStringLiteral("@COMBO_ARROW@"), 22);
+  replace(QStringLiteral("@GRID_CHECK@"), 14);
+  replace(QStringLiteral("@GRID_COMBO_INK@"), 16);
+  replace(QStringLiteral("@GRID_STEP_INK@"), 12);
   replace(QStringLiteral("@ROW_HEIGHT@"), 25);
   replace(QStringLiteral("@HEADER_PAD@"), 6);
   replace(QStringLiteral("@DOCK_FALLBACK_V@"), 1);
