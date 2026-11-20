@@ -60,6 +60,7 @@ bool runReconstructionReviewSmokeTest(const QString &python,const QString &backe
   auto *table=dialog.findChild<QTableView*>(QStringLiteral("reviewImages"));auto *filter=dialog.findChild<QComboBox*>(QStringLiteral("reviewFilter"));auto *groups=dialog.findChild<QComboBox*>(QStringLiteral("reviewGroups"));
   auto *locate=dialog.findChild<QPushButton*>(QStringLiteral("reviewLocateCamera"));auto *restore=dialog.findChild<QPushButton*>(QStringLiteral("reviewRestoreView"));auto *photo=dialog.findChild<QPushButton*>(QStringLiteral("reviewOpenPhoto"));auto *thumb=dialog.findChild<QLabel*>(QStringLiteral("reviewThumbnail"));auto *viewport=dialog.findChild<NativeViewport*>(QStringLiteral("reviewSparseViewport"));
   if(!table||!filter||!groups||!locate||!restore||!photo||!thumb||!viewport)return false;
+  if(!check(filter->findData(QStringLiteral("unregistered"))>=0&&groups->findData(QStringLiteral("distorted/sparse/1"))>=0,"filters and components retain exact string user-data identities"))return false;
   filter->setCurrentIndex(filter->findData(QStringLiteral("unregistered")));
   if(!check(table->model()->rowCount()==7,"actual filter exposes all seven unregistered originals"))return false;
   table->setCurrentIndex(table->model()->index(0,0));table->selectRow(0);

@@ -115,7 +115,7 @@ ReconstructionReviewDialog::ReconstructionReviewDialog(const QString &dataset,co
   m->groups=new QComboBox(body);m->groups->setObjectName(QStringLiteral("reviewGroups"));m->groups->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);m->groups->setMinimumContentsLength(10);bodyLayout->addWidget(m->groups);
   m->groupInfo=new QLabel(body);m->groupInfo->setWordWrap(true);m->groupInfo->setTextFormat(Qt::PlainText);bodyLayout->addWidget(m->groupInfo);
   m->filter=new QComboBox(body);m->filter->setObjectName(QStringLiteral("reviewFilter"));
-  for(const auto &id:{QString(),QStringLiteral("registered"),QStringLiteral("unregistered"),QStringLiteral("abnormal")})m->filter->addItem({},id);
+  for(const auto &id:{QString(),QStringLiteral("registered"),QStringLiteral("unregistered"),QStringLiteral("abnormal")})m->filter->addItem(QString(),QVariant(id));
   bodyLayout->addWidget(m->filter);
   m->search=new QLineEdit(body);m->search->setObjectName(QStringLiteral("reviewSearch"));AppLanguage::bind(m->search,"placeholderText",AppLanguage::source("按完整相对文件名搜索"));bodyLayout->addWidget(m->search);
   m->split=new QSplitter(Qt::Horizontal,body);bodyLayout->addWidget(m->split,1);
@@ -193,7 +193,7 @@ void ReconstructionReviewDialog::request(const QString &group,const QString &act
       selectCurrent();emit inspectionFinished();return;
     }
     m->report=report;m->expired=false;m->image->clear();m->model->removeRows(0,m->model->rowCount());
-    {QSignalBlocker block(m->groups);m->groups->clear();for(const auto &g:report.value(QStringLiteral("groups")).toArray()){const auto v=g.toObject();m->groups->addItem(v.value(QStringLiteral("id")).toString(),v.value(QStringLiteral("id")));}m->groups->setCurrentIndex(m->groups->findData(report.value(QStringLiteral("selectedGroup"))));}
+    {QSignalBlocker block(m->groups);m->groups->clear();for(const auto &g:report.value(QStringLiteral("groups")).toArray()){const QString id=g.toObject().value(QStringLiteral("id")).toString();m->groups->addItem(id,QVariant(id));}m->groups->setCurrentIndex(m->groups->findData(report.value(QStringLiteral("selectedGroup")).toString()));}
     for(const auto &v:report.value(QStringLiteral("rows")).toArray()) {QList<QStandardItem*> items;for(int i=0;i<6;++i)items.append(new QStandardItem);items[0]->setData(v.toObject(),Qt::UserRole);m->model->appendRow(items);}
     m->proxy->apply();m->table->setEnabled(true);m->viewport->setEnabled(m->viewport->setReconstructionReviewData(report));refreshLanguage();selectCurrent();emit inspectionFinished();
   });
