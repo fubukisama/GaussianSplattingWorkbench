@@ -167,7 +167,7 @@ void ReconstructionReviewDialog::invalidate(){m->expired=true;++m->imageGenerati
 void ReconstructionReviewDialog::inspect(const QString &group){m->expired=false;request(group);}
 void ReconstructionReviewDialog::setModelDirectory(const QString &directory){cancel();m->modelDirectory=directory;m->report={};}
 void ReconstructionReviewDialog::request(const QString &group,const QString &action,const QString &rowId) {
-  cancel();m->pending=true;m->output.clear();m->locate->setEnabled(false);m->photo->setEnabled(false);refreshLanguage();
+  cancel();m->pending=true;m->output.clear();m->locate->setEnabled(false);m->photo->setEnabled(false);m->viewport->setEnabled(false);m->table->setEnabled(false);m->groupInfo->clear();m->details->clear();refreshLanguage();
   const auto generation=m->generation;const QString expected=m->report.value(QStringLiteral("identity")).toString();
   auto *process=new QProcess(this);m->process=process;process->setProcessEnvironment(m->environment);process->setWorkingDirectory(m->backend);
   QStringList args{QStringLiteral("-B"),QDir(m->backend).filePath(QStringLiteral("native/worker/reconstruction_review.py")),QStringLiteral("--backend-root"),m->backend,QStringLiteral("--dataset"),m->dataset};
@@ -188,13 +188,14 @@ void ReconstructionReviewDialog::request(const QString &group,const QString &act
     }
     if(!action.isEmpty()) {
       if(report.value(QStringLiteral("identity")).toString()!=expected){invalidate();emit inspectionFinished();return;}
+      m->viewport->setEnabled(true);m->table->setEnabled(true);
       if(action==QStringLiteral("locate")) (void)m->viewport->setReviewCameraView(rowId);
       selectCurrent();emit inspectionFinished();return;
     }
     m->report=report;m->expired=false;m->image->clear();m->model->removeRows(0,m->model->rowCount());
     {QSignalBlocker block(m->groups);m->groups->clear();for(const auto &g:report.value(QStringLiteral("groups")).toArray()){const auto v=g.toObject();m->groups->addItem(v.value(QStringLiteral("id")).toString(),v.value(QStringLiteral("id")));}m->groups->setCurrentIndex(m->groups->findData(report.value(QStringLiteral("selectedGroup"))));}
     for(const auto &v:report.value(QStringLiteral("rows")).toArray()) {QList<QStandardItem*> items;for(int i=0;i<6;++i)items.append(new QStandardItem);items[0]->setData(v.toObject(),Qt::UserRole);m->model->appendRow(items);}
-    m->proxy->apply();m->viewport->setEnabled(m->viewport->setReconstructionReviewData(report));refreshLanguage();selectCurrent();emit inspectionFinished();
+    m->proxy->apply();m->table->setEnabled(true);m->viewport->setEnabled(m->viewport->setReconstructionReviewData(report));refreshLanguage();selectCurrent();emit inspectionFinished();
   });
   QTimer::singleShot(30000,process,[this,process,generation]{if(generation==m->generation&&m->process==process){cancel();invalidate();emit inspectionFinished();}});
   process->start();
@@ -222,12 +223,12 @@ void ReconstructionReviewDialog::refreshLanguage() {
 void ReconstructionReviewDialog::selectCurrent() {
   const auto index=m->proxy->mapToSource(m->table->currentIndex());const auto row=index.isValid()?m->model->item(index.row(),0)->data(Qt::UserRole).toJsonObject():QJsonObject();
   const bool valid=!m->pending&&!m->expired&&!row.isEmpty();
-  m->locate->setEnabled(valid&&row.value(QStringLiteral("pose")).isObject());m->photo->setEnabled(valid&&row.value(QStringLiteral("imagePath")).isString());
+  m->locate->setEnabled(valid&&m->viewport->isEnabled()&&row.value(QStringLiteral("pose")).isObject());m->photo->setEnabled(valid&&row.value(QStringLiteral("imagePath")).isString());
   m->details->setText(row.isEmpty()?QString():text(AppLanguage::source("照片：%1\n%2\n定位：%3\n位姿/路径诊断（原始标识）：%4"))
-      .arg(row.value(QStringLiteral("name")).toString(),stateText(row.value(QStringLiteral("status")).toString()),row.value(QStringLiteral("pose")).isObject()?text(AppLanguage::source("在本分组独立预览中定位")):text(AppLanguage::source("无已验证位姿或坐标关系，不能定位")),row.value(QStringLiteral("poseReason")).toString()));
+      .arg(row.value(QStringLiteral("name")).toString(),stateText(row.value(QStringLiteral("status")).toString()),m->locate->isEnabled()?text(AppLanguage::source("在本分组独立预览中定位")):text(AppLanguage::source("无已验证位姿或坐标关系，不能定位")),row.value(QStringLiteral("poseReason")).toString()));
   if(valid&&row.value(QStringLiteral("imagePath")).isString())loadImage(false);
 }
-void ReconstructionReviewDialog::locate(){if(!m->locate->isEnabled())return;if(stale()){invalidate();return;}const auto row=m->proxy->index(m->table->currentIndex().row(),0).data(Qt::UserRole).toJsonObject();request(m->report.value(QStringLiteral("selectedGroup")).toString(),QStringLiteral("locate"),row.value(QStringLiteral("id")).toString());}
+void ReconstructionReviewDialog::locate(){if(!m->locate->isEnabled())return;if(stale()){invalidate();return;}const auto row=m->proxy->index(m->table->currentIndex().row(),0).data(Qt::UserRole).toJsonObject();m->viewport->beginReviewNavigation();request(m->report.value(QStringLiteral("selectedGroup")).toString(),QStringLiteral("locate"),row.value(QStringLiteral("id")).toString());}
 void ReconstructionReviewDialog::loadImage(bool fullSize) {
   if(m->expired||m->pending)return;
   const auto row=m->proxy->index(m->table->currentIndex().row(),0).data(Qt::UserRole).toJsonObject();
@@ -237,7 +238,7 @@ void ReconstructionReviewDialog::loadImage(bool fullSize) {
   connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,generation,fullSize,relative]{const auto image=watcher->result();watcher->deleteLater();if(generation!=m->imageGeneration||m->expired||!isVisible())return;
     if(image.isNull()){m->image->setText(text(AppLanguage::source("原图不可读、已变化或超过预览预算。")));return;}
     if(!fullSize){m->image->setPixmap(QPixmap::fromImage(image));return;}
-    QDialog viewer(this);viewer.setWindowTitle(relative);auto *layout=new QVBoxLayout(&viewer);auto *label=new QLabel(&viewer);label->setPixmap(QPixmap::fromImage(image));label->setAlignment(Qt::AlignCenter);layout->addWidget(label);viewer.resize(image.size().boundedTo(QSize(1280,900)));viewer.exec();
+    QDialog viewer(this);viewer.setObjectName(QStringLiteral("reviewOriginalImageDialog"));viewer.setProperty("reviewOriginalPath",relative);viewer.setWindowTitle(relative);auto *layout=new QVBoxLayout(&viewer);auto *label=new QLabel(&viewer);label->setPixmap(QPixmap::fromImage(image));label->setAlignment(Qt::AlignCenter);layout->addWidget(label);viewer.resize(image.size().boundedTo(QSize(1280,900)));viewer.exec();
   });
   watcher->setFuture(QtConcurrent::run(m->imagePool,[root,relative,expected,fullSize,epoch,generation]{
     const auto cancelled=[&]{return epoch->load()!=generation;};if(cancelled())return QImage();

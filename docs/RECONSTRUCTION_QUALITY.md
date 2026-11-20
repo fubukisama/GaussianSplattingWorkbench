@@ -46,6 +46,10 @@ navigate. **Restore view** restores target, projection, orbit and distance, also
 after free navigation. Originals can be previewed without a pose. Previews read
 the original bytes on demand and are display-scaled, not the undistorted image;
 the original file is never written.
+Generic first-camera shortcuts cannot initiate review navigation. The selected
+row is revalidated by stable identity, and the pre-navigation view is frozen at
+click time while the asynchronous source check runs. Unusable same-frame display
+geometry disables navigation rather than jumping in an unrelated viewport.
 
 The versioned `gsw.reconstruction_review/1` report binds dataset path, component,
 content SHA-256, size/time and directory membership. Navigation reruns the full

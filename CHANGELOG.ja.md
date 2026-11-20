@@ -36,6 +36,8 @@ CI 成果物やローカルプレビューの配布は、自動的に公開 Rele
   追加の保護では空ディレクトリでも取消を伝播し、曖昧な識別を未登録と断定せず、
   プレビューのルートリンクを再確認します。画像は取消可能な単一キューで復号し、
   対応するソースでのリモート再検証を必要とします。
+  カメラのショートカットは選択行を最初のカメラで代用せず、非同期の移動前にクリック時の
+  視点を保持します。元画像の画素、150% の狭い画面、古いコンテキストも検証対象です。
   [実装ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6)。
   [読み取り専用の保護と選択したメッシュの参照元の修正](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/ca6dd21c200c8395bc81b1065845b3ad39f00ebf)。
 

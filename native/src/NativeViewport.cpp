@@ -7079,6 +7079,10 @@ void NativeViewport::panCamera(const QPoint &delta) {
 }
 
 void NativeViewport::toggleCameraView() {
+  if (mReconstructionReviewOnly) {
+    if (mReviewOriginalView) restoreSourceCameraView();
+    return;
+  }
   if (mCameraViewActive && mStoredCameraView.has_value()) {
     mTarget = mStoredCameraView->target;
     mYawDegrees = mStoredCameraView->yawDegrees;
@@ -7106,7 +7110,7 @@ bool NativeViewport::setReconstructionReviewData(const QJsonObject &report) {
   const auto points = report.value(QStringLiteral("points")).toArray();
   if (points.size() > 12000) return false;
   auto cameras = CameraTrajectory::fromReconstructionReview(report);
-  if (!cameras.metadataVerified()) return false;
+  if (!cameras.metadataVerified() || cameras.invalidCameraCount() != 0) return false;
   QVector<SceneCoordinate3D> positions;
   for (const auto &value : points) {
     const auto p = value.toArray();
@@ -7134,6 +7138,8 @@ bool NativeViewport::setReconstructionReviewData(const QJsonObject &report) {
     }
     coordinates.displayShift = coordinates.globalCenter();
   }
+  if (!coordinates.displayShift.isFinite() || !std::isfinite(coordinates.globalDiagonal()) ||
+      coordinates.globalDiagonal() > double(std::numeric_limits<float>::max()) / 100.) return false;
   mScene->mSceneCoordinates = coordinates;
   for (const auto &p : positions) {
     const auto local=coordinates.localFromGlobal(p); PointCloudVertex vertex;
@@ -7152,10 +7158,17 @@ bool NativeViewport::setReviewCameraView(const QString &rowId) {
   if (!mReconstructionReviewOnly) return false;
   const auto &cameras = mScene->mCameraTrajectory.cameras();
   for (qsizetype i=0;i<cameras.size();++i) if(cameras[i].viewId==rowId) {
-    if (!mReviewOriginalView) mReviewOriginalView=currentProcessingView();
+    beginReviewNavigation();
+    QScopedValueRollback<bool> authorized(mReviewCameraAuthorized,true);
     return setSourceCameraView(i);
   }
   return false;
+}
+
+void NativeViewport::beginReviewNavigation() {
+  if (!mReconstructionReviewOnly) return;
+  mViewSnapTimer->stop();
+  if (!mReviewOriginalView) mReviewOriginalView=currentProcessingView();
 }
 
 void NativeViewport::restoreSourceCameraView() {
@@ -7168,6 +7181,7 @@ void NativeViewport::restoreSourceCameraView() {
 }
 
 bool NativeViewport::setSourceCameraView(const qsizetype index) {
+  if (mReconstructionReviewOnly && !mReviewCameraAuthorized) return false;
   if (!camerasAvailable() || index < 0 || index >= cameraCount()) return false;
   const CameraPose &camera = mScene->mCameraTrajectory.cameras().at(index);
   mSourceCameraIntrinsics.reset();

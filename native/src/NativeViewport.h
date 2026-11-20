@@ -198,6 +198,7 @@ public:
   [[nodiscard]] bool setSourceCameraView(qsizetype index);
   [[nodiscard]] bool setReconstructionReviewData(const QJsonObject &report);
   [[nodiscard]] bool setReviewCameraView(const QString &rowId);
+  void beginReviewNavigation();
   void restoreSourceCameraView();
   [[nodiscard]] float perspectiveFovDegrees() const { return mPerspectiveFovDegrees; }
   [[nodiscard]] RenderMode renderMode() const { return mScene->mRenderMode; }
@@ -791,6 +792,7 @@ private:
   int mMaximumShDegree = -1; // automatic = use the source degree
   bool mCameraViewActive = false;
   bool mReconstructionReviewOnly = false;
+  bool mReviewCameraAuthorized = false;
   bool mShowCameras = false;
   bool mGaussianShaderReady = false;
   bool mMeshShaderReady = false;
