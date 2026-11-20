@@ -58,6 +58,8 @@ BACKEND_FILES = (
     "native/backend/__init__.py",
     "native/backend/compute.py",
     "native/backend/reconstruction_quality.py",
+    "native/backend/reconstruction_review.py",
+    "native/worker/reconstruction_review.py",
     "native/backend/video_extract.py",
     "scripts/postprocess_2dgs_mesh.py",
     "scripts/run_sugar.py",

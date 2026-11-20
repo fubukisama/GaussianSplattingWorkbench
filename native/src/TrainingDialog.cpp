@@ -511,6 +511,12 @@ TrainingDialog::TrainingDialog(const QString &datasetPath, const QString &projec
 
   mReconstructionSummaryLabel = new QLabel(this);
   mReconstructionSummaryLabel->setObjectName(QStringLiteral("trainingReconstructionSummaryLabel"));
+  auto *review = AppLanguage::text(new QPushButton(this), AppLanguage::source("查看重建质检"));
+  review->setObjectName(QStringLiteral("trainingReconstructionReview"));
+  form->addRow(review);
+  connect(review, &QPushButton::clicked, this, [this] {
+    emit reconstructionReviewRequested(mDatasetPath, mCameraDatasetPath, mCameraDatasetIdentity);
+  });
   mReconstructionSummaryLabel->setTextFormat(Qt::PlainText);
   mReconstructionSummaryLabel->setWordWrap(true);
   mReconstructionSummaryLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);

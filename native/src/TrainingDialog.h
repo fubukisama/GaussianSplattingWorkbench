@@ -79,6 +79,8 @@ public:
   void setInitializationWorkspace(const QString &workspaceRoot);
   void useInitializationDataset(const QString &metadataPath, const QString &dataIdentity);
 signals:
+  void reconstructionReviewRequested(const QString &datasetPath, const QString &cameraDatasetPath,
+                                     const QString &cameraDatasetIdentity);
   void initializationVersionCreated(const QString &datasetPath, const QJsonObject &summary,
                                     const QString &inputIdentity);
 

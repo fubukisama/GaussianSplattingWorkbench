@@ -651,6 +651,33 @@ CameraTrajectory CameraTrajectory::loadForScene(const QString &scenePath) {
   return trajectory;
 }
 
+CameraTrajectory CameraTrajectory::fromReconstructionReview(const QJsonObject &report) {
+  CameraTrajectory result;
+  const QString identity = report.value(QStringLiteral("identity")).toString();
+  const QString frame = report.value(QStringLiteral("frame")).toString();
+  if (report.value(QStringLiteral("schema")) != QStringLiteral("gsw.reconstruction_review/1") ||
+      !report.value(QStringLiteral("ready")).toBool() || !validDigest(identity) ||
+      (frame != QStringLiteral("source") && frame != QStringLiteral("canonical"))) return result;
+  const auto rows = report.value(QStringLiteral("rows")).toArray();
+  if (rows.size() > 20000) return result;
+  QSet<QString> seen;
+  for (const auto &value : rows) {
+    const auto row = value.toObject();
+    if (!row.value(QStringLiteral("pose")).isObject()) continue;
+    auto pose = row.value(QStringLiteral("pose")).toObject();
+    pose.insert(QStringLiteral("view_id"), row.value(QStringLiteral("id")));
+    if (pose.value(QStringLiteral("split")).toString().isEmpty()) pose.insert(QStringLiteral("split"), QStringLiteral("train"));
+    CameraPose camera;
+    if (!parseBoundCamera(pose, frame, QStringLiteral("arbitrary"), &camera) || seen.contains(camera.viewId)) {
+      ++result.mInvalidCameraCount; continue;
+    }
+    seen.insert(camera.viewId); result.mCameras.append(camera);
+  }
+  result.mSourcePath = identity; result.mCoordinateFrame = frame;
+  result.mCoordinateUnit = QStringLiteral("arbitrary"); result.mMetadataVerified = true;
+  return result;
+}
+
 const QList<CameraPose> &CameraTrajectory::cameras() const { return mCameras; }
 
 QString CameraTrajectory::sourcePath() const { return mSourcePath; }

@@ -20,6 +20,21 @@ in the same change, with affected capabilities, limitations and verification or
 delivery status. Implementation, verification, publication and installation remain
 separate claims.
 
+## 2026-11-20
+
+- **Added (implementation; remote acceptance pending):** Read-only reconstruction
+  review in 3DGS/2DGS training and applicable mesh/depth/texture workflows. Original
+  inputs, component registrations and verified training references are separate;
+  filter unregistered images, inspect originals and compare available components.
+  Verified poses navigate only in an isolated sparse preview with view restoration,
+  never an unrelated main model. Missing/ambiguous/stale sources remain explicit.
+  No generation starts, no source/project writes, no changed admission thresholds,
+  presets, resume semantics or canonical-camera mesh restrictions. Three live
+  languages and bounded asynchronous reads are included. Per-image errors and
+  unsupported distorted-camera navigation remain unavailable. See
+  [scope and acceptance](docs/RECONSTRUCTION_QUALITY.md#read-only-image-review-2026-11-20).
+  No public release or local installation is performed by this change.
+
 ## 2026-11-18
 
 - **Distribution:** The [November 18 native preview](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261118)

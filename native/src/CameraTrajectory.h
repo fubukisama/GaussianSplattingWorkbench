@@ -47,6 +47,7 @@ struct CameraTrajectoryGeometry final {
 class CameraTrajectory final {
 public:
   [[nodiscard]] static CameraTrajectory loadForScene(const QString &scenePath);
+  [[nodiscard]] static CameraTrajectory fromReconstructionReview(const QJsonObject &report);
 
   [[nodiscard]] const QList<CameraPose> &cameras() const;
   [[nodiscard]] QString sourcePath() const;

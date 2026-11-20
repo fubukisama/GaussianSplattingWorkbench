@@ -20,6 +20,7 @@
 #include "ProcessingPreviewSmokeTest.h"
 #include "TrainingIsolationSmokeTest.h"
 #include "TrainingPreflightSmokeTest.h"
+#include "ReconstructionReviewSmokeTest.h"
 #include "TrainingPerformanceSmokeTest.h"
 #include "WorkspaceDropSmokeTest.h"
 #include "QualityComparisonSmokeTest.h"
@@ -357,6 +358,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption trainingPreflightSmokeOption(QStringLiteral("smoke-test-training-preflight"),
       QStringLiteral("Verify reconstruction provenance and actual reuse/recompute decisions in the training dialog."));
   parser.addOption(trainingPreflightSmokeOption);
+  QCommandLineOption reconstructionReviewSmokeOption(QStringLiteral("smoke-test-reconstruction-review"),
+      QStringLiteral("Verify read-only image/component review and isolated source-camera navigation."));
+  parser.addOption(reconstructionReviewSmokeOption);
   QCommandLineOption generationHistorySmokeOption(QStringLiteral("smoke-test-generation-history"),
       QStringLiteral("Verify persistent experiments, live translations, result viewing and safe resume selection."));
   parser.addOption(generationHistorySmokeOption);
@@ -573,6 +577,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(meshGenerationSmokeOption) ||
                          parser.isSet(trainingResumeSmokeOption) ||
                          parser.isSet(trainingPreflightSmokeOption) ||
+                         parser.isSet(reconstructionReviewSmokeOption) ||
                          parser.isSet(generationHistorySmokeOption) ||
                          parser.isSet(spzSmokeOption) ||
                          parser.isSet(processingPreviewOption) ||
@@ -828,6 +833,14 @@ int main(int argc, char *argv[]) {
   } else if (parser.isSet(generationHistorySmokeOption)) {
     QTimer::singleShot(100, &application, [&]() {
       smokeTestCompleted = gsw::runGenerationHistorySmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(reconstructionReviewSmokeOption)) {
+    QTimer::singleShot(100, &application, [&]() {
+      const QString root = gsw::BackendLocator::findRepositoryRoot(
+          QCoreApplication::applicationDirPath(), qEnvironmentVariable("GSW_BACKEND_ROOT"));
+      smokeTestCompleted = gsw::runReconstructionReviewSmokeTest(
+          qEnvironmentVariable("GSW_PREFLIGHT_TEST_PYTHON", QStringLiteral("python")), root);
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(trainingPreflightSmokeOption)) {

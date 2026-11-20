@@ -343,6 +343,10 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/GenerationHistorySmokeTest.h
   src/TrainingReconstructionSummary.cpp
   src/TrainingReconstructionSummary.h
+  src/ReconstructionReviewDialog.cpp
+  src/ReconstructionReviewDialog.h
+  src/ReconstructionReviewSmokeTest.cpp
+  src/ReconstructionReviewSmokeTest.h
   src/TrainingOutputLocator.h
   src/TrainingPauseController.cpp
   src/TrainingPauseController.h
@@ -1183,6 +1187,15 @@ if(BUILD_TESTING)
   set_tests_properties(native_managed_installation PROPERTIES TIMEOUT 30
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   add_test(NAME native_training_preflight COMMAND GaussianSceneWorkbench --smoke-test-training-preflight)
+  add_test(NAME native_reconstruction_review COMMAND GaussianSceneWorkbench --smoke-test-reconstruction-review)
+  set_tests_properties(native_reconstruction_review PROPERTIES TIMEOUT 120
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_PREFLIGHT_TEST_PYTHON=${Python3_EXECUTABLE};GSW_SMOKE_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/reconstruction-review-evidence"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  add_test(NAME native_reconstruction_review_contracts COMMAND "${Python3_EXECUTABLE}" -B -m unittest
+    native.worker.test_reconstruction_review)
+  set_tests_properties(native_reconstruction_review_contracts PROPERTIES TIMEOUT 120
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    ENVIRONMENT "PYTHONUTF8=1;PYTHONIOENCODING=utf-8")
   add_test(NAME native_training_performance_ui COMMAND GaussianSceneWorkbench --smoke-test-training-performance)
   add_test(NAME native_quality_comparison_ui COMMAND GaussianSceneWorkbench --smoke-test-quality-comparison)
   add_test(NAME native_quality_measurement_ui COMMAND GaussianSceneWorkbench --smoke-test-quality-measurement)

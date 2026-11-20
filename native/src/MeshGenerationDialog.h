@@ -17,6 +17,8 @@ public:
   explicit MeshGenerationDialog(const QString &modelDirectory, QWidget *parent = nullptr);
   [[nodiscard]] QJsonObject configuration() const;
   void setCameraDatasetPath(const QString &path);
+signals:
+  void reconstructionReviewRequested();
 protected:
   void accept() override;
 private:

@@ -68,6 +68,10 @@ MeshGenerationDialog::MeshGenerationDialog(const QString &modelDirectory, QWidge
   mSourceSummary = new QLabel(this);
   mSourceSummary->setWordWrap(true);
   form->addRow(mSourceSummary);
+  auto *review = AppLanguage::text(new QPushButton(this), AppLanguage::source("查看重建质检"));
+  review->setObjectName(QStringLiteral("meshReconstructionReview"));
+  form->addRow(review);
+  connect(review, &QPushButton::clicked, this, &MeshGenerationDialog::reconstructionReviewRequested);
   mMode = new QComboBox(this);
   mMode->setObjectName(QStringLiteral("meshMethodCombo"));
   const QStringList modes = {QStringLiteral("bounded"), QStringLiteral("unbounded"),

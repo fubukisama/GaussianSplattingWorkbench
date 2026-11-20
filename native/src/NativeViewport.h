@@ -196,6 +196,9 @@ public:
     return mScene->mCameraTrajectory.error();
   }
   [[nodiscard]] bool setSourceCameraView(qsizetype index);
+  [[nodiscard]] bool setReconstructionReviewData(const QJsonObject &report);
+  [[nodiscard]] bool setReviewCameraView(const QString &rowId);
+  void restoreSourceCameraView();
   [[nodiscard]] float perspectiveFovDegrees() const { return mPerspectiveFovDegrees; }
   [[nodiscard]] RenderMode renderMode() const { return mScene->mRenderMode; }
   [[nodiscard]] ReferencePlaneMode referencePlaneMode() const {
@@ -780,6 +783,7 @@ private:
   NavigationAxis mAxisView = NavigationAxis::None;
   int mMaximumShDegree = -1; // automatic = use the source degree
   bool mCameraViewActive = false;
+  bool mReconstructionReviewOnly = false;
   bool mShowCameras = false;
   bool mGaussianShaderReady = false;
   bool mMeshShaderReady = false;
@@ -822,6 +826,7 @@ private:
   NavigationGizmoHit mNavigationPress;
   QPoint mNavigationPressPosition;
   std::optional<StoredCameraView> mStoredCameraView;
+  std::optional<StoredCameraView> mReviewOriginalView;
   qsizetype mPointCacheGpuBudgetBytes = 1024LL * 1024LL * 1024LL;
   qsizetype mMeshCacheGpuBudgetBytes = 1024LL * 1024LL * 1024LL;
   QOpenGLShaderProgram *mPointProgram = nullptr;

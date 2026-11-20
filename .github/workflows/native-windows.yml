@@ -77,7 +77,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Acceptance QA dependencies failed." }
           & '${{ steps.qa-python.outputs.python-path }}' -I -B scripts/verify_native_backend.py --root .
           if ($LASTEXITCODE -ne 0) { throw "Native source boundary verification failed." }
-          & '${{ steps.qa-python.outputs.python-path }}' -B -m unittest native.backend.tests.test_initialization native.worker.test_initialization native.backend.tests.test_gs_geometry native.worker.test_gs_geometry native.worker.test_geometry_cli_utf8 native.worker.test_gs_geometry_runtime native.backend.tests.test_geometry_evaluation native.backend.tests.test_reconstruction_comparison.ReconstructionComparisonTests
+          & '${{ steps.qa-python.outputs.python-path }}' -B -m unittest native.worker.test_reconstruction_review native.backend.tests.test_initialization native.worker.test_initialization native.backend.tests.test_gs_geometry native.worker.test_gs_geometry native.worker.test_geometry_cli_utf8 native.worker.test_gs_geometry_runtime native.backend.tests.test_geometry_evaluation native.backend.tests.test_reconstruction_comparison.ReconstructionComparisonTests
           if ($LASTEXITCODE -ne 0) { throw "General reconstruction worker contracts failed before native compilation." }
           $root = Join-Path $PWD 'native/.deps'
           & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
@@ -103,6 +103,13 @@ jobs:
         run: |
           ./scripts/setup_native_ci_display.ps1
           ./scripts/setup_native_ci_graphics.ps1
+      - name: Verify reconstruction review and source-camera navigation
+        shell: pwsh
+        run: |
+          ctest --test-dir native/build-acceptance -C Release --no-tests=error --output-on-failure `
+            --output-log native/reconstruction-review.log `
+            -R '^(native_reconstruction_review|native_reconstruction_review_contracts)$'
+          if ($LASTEXITCODE -ne 0) { throw "Read-only reconstruction review acceptance failed." }
       - name: Verify actual upstream viewport behavior
         shell: pwsh
         env:
@@ -132,6 +139,8 @@ jobs:
           path: |
             native/acceptance.log
             native/acceptance-path-presets.log
+            native/reconstruction-review.log
+            native/build-acceptance/reconstruction-review-evidence/
             native/acceptance-artifact/
             native/build-acceptance/blender-viewport-evidence/
             native/build-acceptance/texture-text-captures/

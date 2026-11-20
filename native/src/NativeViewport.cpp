@@ -7085,6 +7085,74 @@ void NativeViewport::toggleCameraView() {
   (void)setSourceCameraView(0);
 }
 
+bool NativeViewport::setReconstructionReviewData(const QJsonObject &report) {
+  // Never repurpose a viewport containing a user's project/model. The caller
+  // creates a separate observation-only instance owned by the review dialog.
+  if (!mReconstructionReviewOnly && (!mScene->mScenePath.isEmpty() || !mSceneStates.isEmpty())) return false;
+  const auto points = report.value(QStringLiteral("points")).toArray();
+  if (points.size() > 12000) return false;
+  auto cameras = CameraTrajectory::fromReconstructionReview(report);
+  if (!cameras.metadataVerified()) return false;
+  QVector<SceneCoordinate3D> positions;
+  for (const auto &value : points) {
+    const auto p = value.toArray();
+    if (p.size()!=3 || !p[0].isDouble() || !p[1].isDouble() || !p[2].isDouble()) return false;
+    SceneCoordinate3D point{p[0].toDouble(), p[1].toDouble(), p[2].toDouble()};
+    if (!point.isFinite()) return false;
+    positions.append(point);
+  }
+  mScene->mRequestedScenePath = QStringLiteral("review-reset");
+  setScene({}, 0);
+  mReconstructionReviewOnly = true;
+  mReviewOriginalView.reset();
+  mScene->mCameraTrajectory = std::move(cameras);
+  mScene->mPreviewOnlyScene = true;
+  SceneCoordinateInfo coordinates; coordinates.valid = true;
+  QList<SceneCoordinate3D> bounds;
+  for (const auto &p : positions) bounds.append(p);
+  for (const auto &camera : mScene->mCameraTrajectory.cameras()) bounds.append(camera.globalPosition);
+  if (!bounds.isEmpty()) {
+    coordinates.globalMinimum = coordinates.globalMaximum = bounds.first();
+    for (const auto &p : bounds) {
+      coordinates.globalMinimum.x=std::min(coordinates.globalMinimum.x,p.x); coordinates.globalMaximum.x=std::max(coordinates.globalMaximum.x,p.x);
+      coordinates.globalMinimum.y=std::min(coordinates.globalMinimum.y,p.y); coordinates.globalMaximum.y=std::max(coordinates.globalMaximum.y,p.y);
+      coordinates.globalMinimum.z=std::min(coordinates.globalMinimum.z,p.z); coordinates.globalMaximum.z=std::max(coordinates.globalMaximum.z,p.z);
+    }
+    coordinates.displayShift = coordinates.globalCenter();
+  }
+  mScene->mSceneCoordinates = coordinates;
+  for (const auto &p : positions) {
+    const auto local=coordinates.localFromGlobal(p); PointCloudVertex vertex;
+    vertex.x=local.x();vertex.y=local.y();vertex.z=local.z();
+    vertex.sourceIndex=quint32(mScene->mPreviewVertices.size());mScene->mPreviewVertices.append(vertex);
+  }
+  mScene->mPreviewPointCount = mScene->mSourceVertexCount = positions.size();
+  mScene->mSceneCenter = coordinates.localCenter();
+  mScene->mSceneRadius = float(std::max(coordinates.globalDiagonal()*.5, .01));
+  mScene->mEditModel.reset(positions.size()); setEditToolsLocked(true); setShowCameras(true);
+  rebuildCameraGeometry(); rebuildRenderedVertices(); resetCamera(); update();
+  return true;
+}
+
+bool NativeViewport::setReviewCameraView(const QString &rowId) {
+  if (!mReconstructionReviewOnly) return false;
+  const auto &cameras = mScene->mCameraTrajectory.cameras();
+  for (qsizetype i=0;i<cameras.size();++i) if(cameras[i].viewId==rowId) {
+    if (!mReviewOriginalView) mReviewOriginalView=currentProcessingView();
+    return setSourceCameraView(i);
+  }
+  return false;
+}
+
+void NativeViewport::restoreSourceCameraView() {
+  if (mReconstructionReviewOnly && mReviewOriginalView) {
+    mViewSnapTimer->stop(); restoreProcessingView(*mReviewOriginalView);
+    mReviewOriginalView.reset(); mCameraViewActive=false; mStoredCameraView.reset();
+    mSourceCameraIntrinsics.reset(); mSourceCameraClipping.reset(); update(); return;
+  }
+  if (mCameraViewActive && mStoredCameraView) toggleCameraView();
+}
+
 bool NativeViewport::setSourceCameraView(const qsizetype index) {
   if (!camerasAvailable() || index < 0 || index >= cameraCount()) return false;
   const CameraPose &camera = mScene->mCameraTrajectory.cameras().at(index);

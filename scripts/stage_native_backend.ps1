@@ -122,6 +122,8 @@ $StaticFiles = @(
   @{ Source = "native\worker\training_preview.py"; Destination = "native\worker\training_preview.py" },
   @{ Source = "native\worker\training_preview_policy.py"; Destination = "native\worker\training_preview_policy.py" },
   @{ Source = "native\worker\training_reconstruction_summary.py"; Destination = "native\worker\training_reconstruction_summary.py" },
+  @{ Source = "native\worker\reconstruction_review.py"; Destination = "native\worker\reconstruction_review.py" },
+  @{ Source = "native\backend\reconstruction_review.py"; Destination = "native\backend\reconstruction_review.py" },
   @{ Source = "native\worker\training_checkpoint.py"; Destination = "native\worker\training_checkpoint.py" },
   @{ Source = "native\worker\training_density_control.py"; Destination = "native\worker\training_density_control.py" },
   @{ Source = "native\worker\training_summary.py"; Destination = "native\worker\training_summary.py" },

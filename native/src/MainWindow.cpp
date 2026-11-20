@@ -31,6 +31,7 @@
 #include "ResourceBudgetDialog.h"
 #include "ResourceBudget.h"
 #include "TrainingDialog.h"
+#include "ReconstructionReviewDialog.h"
 #include "TrainingRequestStore.h"
 #include "ExistingTrainingDialog.h"
 #include "RuntimeGuardDialog.h"
@@ -7337,6 +7338,13 @@ void MainWindow::startMeshGeneration() {
   }
   MeshGenerationDialog dialog(source, this);
   dialog.setCameraDatasetPath(mWorkspace.cameraDatasetPath());
+  connect(&dialog, &MeshGenerationDialog::reconstructionReviewRequested, this, [this, &dialog, python, root] {
+    const auto environment = pythonProcessEnvironment(python);
+    if (!environment.ready()) return;
+    ReconstructionReviewDialog review(mWorkspace.datasetPath(), python, root, environment.environment,
+        mWorkspace.cameraDatasetPath(), mWorkspace.cameraDatasetIdentity(), &dialog);
+    review.exec();
+  });
   if (dialog.exec() != QDialog::Accepted) return;
   QJsonObject config = dialog.configuration();
   if (CameraDatasetInfo::meshGenerationBlocked(config)) {
@@ -7447,6 +7455,12 @@ void MainWindow::startTraining() {
       appendTaskEvent(QCoreApplication::translate("Workbench", "已恢复手动训练参数；当前输入的相机策略、分辨率策略与倍率保持不变，不会自动运行 SfM。"));
   }
   dialog.setReconstructionProbe(python, root, pythonEnvironment.environment);
+  connect(&dialog, &TrainingDialog::reconstructionReviewRequested, this,
+      [&dialog, python, root, environment = pythonEnvironment.environment](const QString &dataset,
+          const QString &camera, const QString &identity) {
+    ReconstructionReviewDialog review(dataset, python, root, environment, camera, identity, &dialog);
+    review.exec();
+  });
   dialog.setInitializationWorkspace(mWorkspace.rootPath());
   const QString initializationProjectRoot = comparablePath(mWorkspace.rootPath());
   connect(&dialog, &TrainingDialog::initializationVersionCreated, this,

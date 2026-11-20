@@ -1,5 +1,81 @@
 # Reconstruction admission and Gaussian quality regression
 
+## Read-only image review (2026-11-20)
+
+Use **Review reconstruction** beside the training-source summary (shared by
+3DGS and 2DGS), or the same entry in the mesh/depth/texture dialog. It launches
+only `native/worker/reconstruction_review.py`, not a training worker, COLMAP,
+mesh generation, or source recovery. Closing cancels that inspection process.
+
+The original list comes from the bounded recursive `input` tree. If unavailable,
+an existing import manifest can enumerate archived photos only when every record
+has an exact safe `trainingPath` to `archivePath` mapping. A video's frame count
+alone cannot enumerate missing originals. `images` is never substituted as the
+original list. Current-group registration comes from that group's validated
+COLMAP image records; calibrations are counted separately. The training list is
+the current `sparse/0` image list with verified undistorted PINHOLE references in
+`images`, or a verified locked-camera train split. Absent/unsupported references
+remain **not prepared or unverifiable**, not a count inferred from registration.
+
+The list exposes full relative names, original membership, registration, training
+membership and split. Filter unregistered images or file/identity problems; search
+uses the full relative path. Nested equal basenames are independent. Unsafe paths,
+links, Unicode/case-fold ambiguity, duplicate IDs, missing files and corrupt models
+are refused or diagnosed, never resolved by basename or list position. Existing
+admission thresholds and resume/mesh compatibility rules are not changed.
+
+Choose an available component to inspect it; this does not select it for training.
+The component summary uses the existing admission function and labels the stored
+valid sparse-point mean ERROR in px. It is not a per-image projection residual.
+Per-image error is deliberately unavailable until real observations and tracks
+are evaluated; unknown is not zero. Registration coverage is not surface
+completeness, metric accuracy or held-out quality. Candidate history without
+verifiable model files is not fabricated.
+
+Only an explicitly selected **Go to camera** action or double-click on a row with
+a verified pose navigates. It uses a separate read-only sparse viewport in the
+selected model's source frame (canonical frame for locked inputs), never the
+possibly unrelated main model. Source center, orientation/roll and intrinsics
+reuse the native source-camera path; unsupported distorted projection cannot
+navigate. **Restore view** restores target, projection, orbit and distance, also
+after free navigation. Originals can be previewed without a pose. Previews read
+the original bytes on demand and are display-scaled, not the undistorted image;
+the original file is never written.
+
+The versioned `gsw.reconstruction_review/1` report binds dataset path, component,
+content SHA-256, size/time and directory membership. Navigation reruns the full
+identity check; image reads verify exact image bytes and safe containment.
+Changed sources expire the report and disable actions. Closing/superseding a
+request invalidates late process/image callbacks. Viewing uses no CUDA. Limits:
+20,000 images/views, 128 components, 256 MiB per model file, 2 GiB hashed input,
+12,000 display-only sparse points, 32 MiB report and 30-second helper deadline.
+Oversized sources stop with an unavailable report, not a partial quality pass.
+
+Locked camera/transforms sources keep train/val/test membership and report SfM
+registration as not applicable. Review does not send held-out images to SfM,
+initialization or training. Existing canonical-camera restrictions on external
+mesh/texture backends remain in force. All mesh methods share observation facts,
+not a new claim that their camera readers support canonical inputs.
+
+Remote acceptance surfaces: `native_reconstruction_review_contracts` (owned
+binary/text, 2/9, paths, corrupt/missing sources, identity and split fixtures) and
+`native_reconstruction_review` (actual native filter, photo thumbnail, isolated
+camera pose/restore, three languages, both themes and normal/narrow layouts).
+The existing `native_training_preflight` and language/camera gates remain intact.
+Implementation, exact-source remote results, public release and local installation
+are separate: this source change does not itself publish or install a version.
+
+中文：训练和网格窗口共用“查看重建质检”。原始输入、当前分组注册图与实际训练图
+分别列出；没有原图清单时不按计数捏造未注册照片。切换分组仅供查看。原图按需读取，
+有效位姿仅在本分组独立稀疏预览中定位并可返回，不替换主模型。只读检查不启动生成，
+不改门槛、预设、工程或原始数据；未知误差不填零。三语即时切换保留当前审阅状态。
+
+日本語：学習・メッシュ画面で共通の「再構築の品質を確認」を使用します。元画像、
+選択コンポーネントの登録画像、実際の学習一覧を分け、不明な一覧や誤差を捏造しません。
+コンポーネントの閲覧は学習の選択を変更しません。元画像を必要時に読み込み、検証済み
+姿勢への移動と復帰は独立した疎点群プレビューのみで行います。主モデル、工程、入力、
+既存の受け入れ条件や非対応バックエンドの制限は変更せず、生成処理を開始しません。
+
 ## Shared workflow
 
 COLMAP output components are not ordered by quality. The native compute backend now inspects every component before undistortion. A viable candidate needs at least 3 registered views, 100 finite sparse points supported by at least two registered images, at most 4 px reprojection error for those points, and at least 50% input-image registration. At least 95% of the sparse points must meet the point checks. Among viable components, registration coverage takes priority, then valid point count and reprojection error. Registration below 80% is reported as partial coverage, not hidden as success.
