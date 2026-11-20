@@ -41,6 +41,7 @@ separate claims.
   case-fold identities unknown, recheck preview-root links and serialize on-demand
   image decoding. Exact-source remote retesting is required.
   [Implementation source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6).
+  [Read-only guard and selected mesh-source fix](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/ca6dd21c200c8395bc81b1065845b3ad39f00ebf).
 
 ## 2026-11-18
 

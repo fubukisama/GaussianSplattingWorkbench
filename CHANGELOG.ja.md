@@ -37,6 +37,7 @@ CI 成果物やローカルプレビューの配布は、自動的に公開 Rele
   プレビューのルートリンクを再確認します。画像は取消可能な単一キューで復号し、
   対応するソースでのリモート再検証を必要とします。
   [実装ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6)。
+  [読み取り専用の保護と選択したメッシュの参照元の修正](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/ca6dd21c200c8395bc81b1065845b3ad39f00ebf)。
 
 ## 2026-11-18
 

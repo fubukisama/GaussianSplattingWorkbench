@@ -208,8 +208,9 @@ void ReconstructionReviewDialog::refreshLanguage() {
     m->model->item(i,2)->setText(membership(row.value(QStringLiteral("original"))));m->model->item(i,3)->setText(membership(row.value(QStringLiteral("training"))));
     m->model->item(i,4)->setText(row.value(QStringLiteral("split")).toString(text(AppLanguage::source("未知"))));m->model->item(i,5)->setText(text(AppLanguage::source("不可用")));}
   if(m->pending){m->summary->setText(text(AppLanguage::source("正在只读检查照片与分组…")));return;}
-  if(m->expired){m->summary->setText(text(AppLanguage::source("报告已过期或无法核实来源；请重新检查。定位和图片读取已禁用。")));return;}
-  m->summary->setText(text(AppLanguage::source("原始输入：%1 · 当前分组注册：%2 · 未注册：%3 · 实际训练使用：%4\n原始清单来源：%5 · 训练清单状态：%6"))
+  if(m->expired){m->summary->setText(text(AppLanguage::source("报告已过期或无法核实来源；请重新检查。定位和图片读取已禁用。"))+QLatin1Char('\n')+
+      text(AppLanguage::source("技术诊断（原始标识保留）：%1")).arg(m->report.value(QStringLiteral("diagnostic")).toString()));return;}
+  m->summary->setText(text(AppLanguage::source("数据集"))+QStringLiteral(": ")+QDir::toNativeSeparators(m->report.value(QStringLiteral("dataset")).toString())+QLatin1Char('\n')+text(AppLanguage::source("原始输入：%1 · 当前分组注册：%2 · 未注册：%3 · 实际训练使用：%4\n原始清单来源：%5 · 训练清单状态：%6"))
       .arg(count(m->report.value(QStringLiteral("originalCount"))),m->report.value(QStringLiteral("registrationApplicable")).toBool()?count(m->report.value(QStringLiteral("registeredCount"))):text(AppLanguage::source("不适用")),count(m->report.value(QStringLiteral("unregisteredCount"))),count(m->report.value(QStringLiteral("trainingCount"))),m->report.value(QStringLiteral("originalAvailable")).toBool()?m->report.value(QStringLiteral("originalSource")).toString():text(AppLanguage::source("原始清单不可核对")),m->report.value(QStringLiteral("trainingStatus")).toString()==QStringLiteral("not_prepared")?text(AppLanguage::source("尚未准备或不可核实")):text(AppLanguage::source("已验证的训练清单"))));
   for(const auto &g:m->report.value(QStringLiteral("groups")).toArray()){const auto group=g.toObject();if(group.value(QStringLiteral("id"))!=m->report.value(QStringLiteral("selectedGroup")))continue;
     QStringList reasons;for(const auto &r:group.value(QStringLiteral("reasons")).toArray())reasons.append(reasonText(r.toString())+QStringLiteral(" [")+r.toString()+QLatin1Char(']'));
