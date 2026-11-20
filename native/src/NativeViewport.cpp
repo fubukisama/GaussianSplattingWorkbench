@@ -4632,6 +4632,8 @@ QString NativeViewport::viewportStatusText() const {
     const QString performance = viewportPerformanceText();
     return performance.isEmpty() ? mode : mode + QStringLiteral(" · ") + performance;
   };
+  if (mReconstructionReviewOnly)
+    return withPerformance(QCoreApplication::translate("Workbench", "重建质检（只读）"));
   if (!mProcessingPreviewVisible && visibleSceneObjectCount() == 0 && sceneObjectCount() > 0)
     return withPerformance(QCoreApplication::translate("Workbench", "模型已隐藏"));
   if (!visibleModelAvailable() && !mTrainingGpuPreview.attached() && mScene->mScenePath.isEmpty())
@@ -7123,6 +7125,7 @@ bool NativeViewport::setReconstructionReviewData(const QJsonObject &report) {
   setScene({}, 0);
   mReconstructionReviewOnly = true;
   mReviewOriginalView.reset();
+  mProjectLabel = report.value(QStringLiteral("selectedGroup")).toString();
   mScene->mCameraTrajectory = std::move(cameras);
   mScene->mPreviewOnlyScene = true;
   SceneCoordinateInfo coordinates; coordinates.valid = true;
@@ -9119,7 +9122,9 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   painter.setPen(overlayBorder());
   painter.setBrush(overlaySurface(colors.card, 225));
 
-  const QString sceneName = (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame())
+  const QString sceneName = mReconstructionReviewOnly
+                                ? QCoreApplication::translate("Workbench", "重建质检（只读）")
+                                : (trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame())
                                 ? mScene->mRenderMode == RenderMode::Points
                                       ? QCoreApplication::translate("Workbench", "训练中 · 点云增密预览")
                                       : QCoreApplication::translate("Workbench", "训练中 · GPU 实时预览")
@@ -9129,7 +9134,10 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   const QString project =
       mProjectLabel.isEmpty() ? QCoreApplication::translate("Workbench", "未打开工程") : mProjectLabel;
   QString count;
-  if ((trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame())) {
+  if (mReconstructionReviewOnly) {
+    count = QCoreApplication::translate("Workbench", "显示稀疏点：%1 · 相机：%2 · 只读")
+        .arg(formatCount(mScene->mPreviewPointCount), formatCount(cameraCount()));
+  } else if ((trainingGpuPreviewForScene() && mTrainingGpuPreview.hasFrame())) {
     count = mScene->mRenderMode == RenderMode::Points
                 ? QCoreApplication::translate("Workbench", "迭代 %1 | %2 高斯中心（点云）| 共享 GPU 显存")
                       .arg(mTrainingGpuPreview.iteration())

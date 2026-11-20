@@ -1,4 +1,5 @@
 {
+  "显示稀疏点：%1 · 相机：%2 · 只读": {"zh_CN":"显示稀疏点：%1 · 相机：%2 · 只读","en_US":"Displayed sparse points: %1 · Cameras: %2 · Read-only","ja_JP":"表示中の疎点：%1 · カメラ：%2 · 読み取り専用"},
   "查看重建质检": {"zh_CN":"查看重建质检","en_US":"Review reconstruction","ja_JP":"再構築の品質を確認"},
   "重建质检（只读）": {"zh_CN":"重建质检（只读）","en_US":"Reconstruction review (read-only)","ja_JP":"再構築の品質確認（読み取り専用）"},
   "按完整相对文件名搜索": {"zh_CN":"按完整相对文件名搜索","en_US":"Search full relative image names","ja_JP":"画像の相対パス全体を検索"},

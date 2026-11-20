@@ -33,6 +33,8 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
   解码限制为单图可取消队列；仍需对应源码的远端重验。
   质检相机快捷入口不能以第一个相机代替所选行；异步定位保留点击时的视角。窗口回归
   同时核对原图真实像素、150% 窄窗口和过期上下文隔离。
+  独立预览明确标注显示中的稀疏点子集、相机数和只读状态。
+  [逐行导航保护](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/ae81c54508b7d17f1ae86831c72428805b95df65)。
   [实现源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/87116348a54d719f2556cbddbd1913aa759313b6)。
   [只读保护与所选网格来源修正](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/ca6dd21c200c8395bc81b1065845b3ad39f00ebf)。
 
