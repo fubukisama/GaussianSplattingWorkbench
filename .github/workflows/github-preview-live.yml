@@ -57,7 +57,8 @@ jobs:
       - name: Download known immutable public Windows bytes through the pinned production transport
         shell: pwsh
         run: |
-          cmake -S qa/.github/preview-acceptance -B D:/gsw-public-qa/probe -A x64 "-DGSW_PRODUCT_NATIVE=$PWD/product/native"
+          $native=(Resolve-Path -LiteralPath 'product/native').Path.Replace('\','/')
+          cmake -S qa/.github/preview-acceptance -B D:/gsw-public-qa/probe -A x64 "-DGSW_PRODUCT_NATIVE:PATH=$native"
           if($LASTEXITCODE){exit $LASTEXITCODE}
           cmake --build D:/gsw-public-qa/probe --config Release --parallel 4
           if($LASTEXITCODE){exit $LASTEXITCODE}

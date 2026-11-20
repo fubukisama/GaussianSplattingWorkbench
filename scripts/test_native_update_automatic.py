@@ -55,7 +55,7 @@ def package_automatic_a(root, executable, tool, commit, tree):
         "native/updater-ui/CMakeLists.txt", "native/i18n/catalog.json", "scripts/native_i18n.py"]
     for stem in ("AppLanguage", "NativeInstallation", "NativeStartupHealth", "NativeUpdateUi"):
         sources.extend("native/src/" + stem + suffix for suffix in (".cpp", ".h"))
-    sources.append("native/src/NativeUpdateLocalPath.h")
+    sources.extend(("native/src/NativeUpdateLocalPath.h", "native/src/NativeGithubPreviewFeed.h"))
     for prefix in ("native/third_party/nlohmann", "native/third_party/qt-process-quote"):
         sources.extend(path.relative_to(REPO).as_posix()
             for path in sorted((REPO / prefix).rglob("*")) if path.is_file())
