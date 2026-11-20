@@ -4439,7 +4439,11 @@ void MainWindow::updateEditActions() {
   // Retained (possibly all-hidden) objects still own this toolbar row; hiding
   // it changes the QOpenGLWidget aspect and moves the observed scene even
   // though the camera target, distance and orbit have not changed.
-  const bool sceneToolsPresent = anyScene || mViewport->sceneObjectCount() > 0;
+  // A dataset can produce its first sparse observation asynchronously. Reserve
+  // this row when the dataset is associated, not when its first points arrive.
+  // Individual actions still depend on actual model/edit eligibility below.
+  const bool sceneToolsPresent = anyScene || mViewport->sceneObjectCount() > 0 ||
+                                 !mWorkspace.datasetPath().isEmpty();
   if (mInspectAction == nullptr) {
     return;
   }

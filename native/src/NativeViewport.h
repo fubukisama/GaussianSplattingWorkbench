@@ -453,6 +453,13 @@ private:
     qint64 metadataSourceModified = -1;
     RenderMode mRenderMode = RenderMode::Points;
     SceneCoordinateInfo mSceneCoordinates;
+    // Transient point observations share a source frame, but not bounds or
+    // necessarily the same numerical display shift. Never persist this datum.
+    struct SparseGridAnchor {
+      SceneCoordinate3D origin;
+      SceneCoordinate3D minimum;
+    };
+    std::optional<SparseGridAnchor> sparseGridAnchor;
     QVector3D mSceneCenter = QVector3D(0.0F, 0.0F, 0.0F);
     QVector3D mModelTranslation = QVector3D(0.0F, 0.0F, 0.0F);
     QQuaternion mModelRotation;

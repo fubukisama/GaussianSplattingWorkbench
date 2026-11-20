@@ -16,7 +16,7 @@ namespace gsw {
 bool runProcessingPreviewSmokeTest(NativeViewport &viewport) {
   QTemporaryDir directory;
   if (!directory.isValid()) return false;
-  const auto fixture = [&](const QString &name, int count, bool gaussian) {
+  const auto fixture = [&](const QString &name, int count, bool gaussian, int z = 0) {
     const QString path = directory.filePath(name + QStringLiteral(".ply"));
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly)) return QString();
@@ -24,7 +24,7 @@ bool runProcessingPreviewSmokeTest(NativeViewport &viewport) {
         "\nproperty float x\nproperty float y\nproperty float z\n";
     if (gaussian) header += "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\nproperty float opacity\nproperty float scale_0\nproperty float scale_1\nproperty float scale_2\nproperty float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float rot_3\n";
     file.write(header + "end_header\n");
-    for (int i = 0; i < count; ++i) file.write(QByteArray::number(i % 3 - 1) + " " + QByteArray::number(i % 2) + " 0" +
+    for (int i = 0; i < count; ++i) file.write(QByteArray::number(i % 3 - 1) + " " + QByteArray::number(i % 2) + " " + QByteArray::number(z) +
         (gaussian ? " 0 0 0 1 -2 -2 -2 1 0 0 0\n" : "\n"));
     return path;
   };
@@ -55,7 +55,8 @@ bool runProcessingPreviewSmokeTest(NativeViewport &viewport) {
   viewport.beginProcessingPreview();
   viewport.setProcessingStage(QStringLiteral("colmap"), -1, -1, 25);
   check(viewport.visibleModelAvailable(), "previous geometry stays visible before first reconstruction");
-  viewport.setPreviewScene(fixture(QStringLiteral("sparse"), 5, false), 5);
+  viewport.setReferencePlaneMode(NativeViewport::ReferencePlaneMode::ModelBase);
+  viewport.setPreviewScene(fixture(QStringLiteral("sparse"), 5, false, -2), 5);
   check(viewport.renderedPointCount() == 6, "old buffers are not cleared on a request");
   check(wait([&] { return loaded == 2; }), "sparse model loads");
   viewport.grabFramebuffer();
@@ -78,19 +79,31 @@ bool runProcessingPreviewSmokeTest(NativeViewport &viewport) {
         std::abs(angles.yawDegrees - now.yawDegrees) < 1e-4F &&
         std::abs(angles.pitchDegrees - now.pitchDegrees) < 1e-4F;
   };
+  check(viewport.referencePlaneElevation() == -2., "first sparse observation establishes its actual grid datum");
+  const QString expandedSparse = fixture(QStringLiteral("sparse-expanded"), 7, false, -7);
+  viewport.setPreviewScene(expandedSparse, 7);
+  check(wait([&] { return viewport.scenePath() == expandedSparse && viewport.renderedPointCount() == 7; }),
+        "next sparse snapshot with a lower base becomes visible");
+  check(viewport.sceneCoordinates().globalMinimum.z == -7. && viewport.referencePlaneElevation() == -2. &&
+        cameraUnchanged(), "new points update measured bounds without moving the sparse grid or orbit");
+  viewport.setReferencePlaneMode(NativeViewport::ReferencePlaneMode::WorldZero);
+  check(viewport.referencePlaneElevation() == 0., "world-zero remains independently selectable during sparse preview");
+  viewport.setReferencePlaneMode(NativeViewport::ReferencePlaneMode::ModelBase);
+  check(viewport.referencePlaneElevation() == -2., "switching back restores the sparse datum");
   viewport.setProcessingStage(QStringLiteral("train"), 0, 1000, 0);
   viewport.setPreviewScene(fixture(QStringLiteral("initial"), 9, true), 9);
-  check(viewport.renderedPointCount() == 5, "points remain until Gaussians are ready");
-  check(wait([&] { return loaded == 3; }), "initial Gaussians load");
+  check(viewport.renderedPointCount() == 7, "points remain until Gaussians are ready");
+  check(wait([&] { return loaded == 4; }), "initial Gaussians load");
   viewport.grabFramebuffer();
   check(viewport.sourceHasGaussianAttributes(), "point to Gaussian attribute transition");
+  check(viewport.referencePlaneElevation() == 0., "Gaussian geometry does not inherit the sparse preview datum");
   check(cameraUnchanged(), "initialization does not reset navigation");
   check(!viewport.hasEditableScene(), "live frame cannot be destructively edited");
   viewport.setPreviewScene(fixture(QStringLiteral("live1"), 12, true), 12);
   viewport.setPreviewScene(fixture(QStringLiteral("live2"), 15, true), 15);
   viewport.setPreviewScene(fixture(QStringLiteral("live3"), 18, true), 18);
   check(wait([&] { viewport.grabFramebuffer(); return viewport.renderedPointCount() == 18; }), "latest queued update is delivered");
-  check(loaded == 5, "slow loader coalesces intermediate updates");
+  check(loaded == 6, "slow loader coalesces intermediate updates");
   check(cameraUnchanged(), "live updates retain camera");
   viewport.setPreviewScene(directory.filePath(QStringLiteral("missing.ply")), 20);
   check(wait([&] { return failures == 1; }), "failed read is reported");

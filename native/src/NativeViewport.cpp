@@ -2839,6 +2839,8 @@ void NativeViewport::setReferencePlaneMode(const ReferencePlaneMode mode) {
 
 double NativeViewport::referencePlaneElevation() const {
   if (mReferencePlaneMode != ReferencePlaneMode::ModelBase) return 0.0;
+  if (mScene == mProcessingScene && mScene->sparseGridAnchor)
+    return mScene->sparseGridAnchor->minimum.z;
   double minimum=std::numeric_limits<double>::infinity();
   const auto reference=sceneReferenceCoordinates();
   // The original source base is a stable project reference, not the bounds of
@@ -2861,6 +2863,9 @@ QString NativeViewport::referencePlaneDescription() const {
       !sceneReferenceCoordinates().valid) {
     return QCoreApplication::translate("Workbench", "世界坐标 Z=0");
   }
+  if (mScene == mProcessingScene && mScene->sparseGridAnchor)
+    return QCoreApplication::translate("Workbench", "稀疏点云首帧基准 Z=%1")
+        .arg(formatSceneCoordinate(referencePlaneElevation(), sceneReferenceCoordinates()));
   return QCoreApplication::translate("Workbench", "固定基准 Z=%1")
       .arg(formatSceneCoordinate(referencePlaneElevation(), sceneReferenceCoordinates()));
 }
@@ -4228,6 +4233,15 @@ void NativeViewport::startSceneLoad(const QString &scenePath, const bool continu
             rebuildCameraGeometry();
             const bool loadedHasMesh = data.hasMesh();
             mScene->mPreviewPointCount = data.previewPointCount();
+            if (!continuous || targetScene != mProcessingScene || loadedHasMesh || data.hasGaussianAttributes) {
+              mScene->sparseGridAnchor.reset();
+            } else if (!mScene->sparseGridAnchor && data.coordinates.valid && mScene->mPreviewPointCount > 0) {
+              // Pin only the preview grid. Point bounds, geometry, clipping and
+              // camera navigation still use the current observation. Store both
+              // the in-plane origin and base in source coordinates for rebasing.
+              mScene->sparseGridAnchor = SceneState::SparseGridAnchor{
+                  data.coordinates.globalFromLocal(QVector3D()), data.coordinates.globalMinimum};
+            }
             mScene->mSourceVertexCount = data.sourceVertexCount;
             mScene->mSourceFaceCount = data.sourceFaceCount;
             mScene->mPreviewTriangleCount = data.meshCache.isValid()
@@ -7367,6 +7381,16 @@ QVector3D NativeViewport::gridOrigin(const ReferenceGridPlane plane) const {
   const auto mapping = sceneDisplayTransform(reference, *mScene);
   if (mReferencePlaneMode == ReferencePlaneMode::WorldZero) {
     return mapping.map(coordinates.localFromGlobal({0.0, 0.0, 0.0}));
+  }
+  if (mScene == mProcessingScene && mScene->sparseGridAnchor) {
+    const auto &anchor = *mScene->sparseGridAnchor;
+    auto origin = anchor.origin;
+    switch (plane) {
+    case ReferenceGridPlane::XY: origin.z = anchor.minimum.z; break;
+    case ReferenceGridPlane::XZ: origin.y = anchor.minimum.y; break;
+    case ReferenceGridPlane::YZ: origin.x = anchor.minimum.x; break;
+    }
+    return coordinates.localFromGlobal(origin);
   }
   QVector3D minimum, maximum;
   if (!collectionReferenceBounds(minimum, maximum)) return mapping.map(QVector3D());
