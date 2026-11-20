@@ -1,0 +1,55 @@
+name: GitHub preview update
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'native/github-preview-update/**'
+      - 'native/src/NativeGithubPreview*'
+      - 'native/src/NativeUnanchoredBootstrap*'
+      - 'native/src/NativeActivationCore*'
+      - 'native/src/NativeUpdateUi*'
+      - 'packaging/windows/gsw.iss'
+      - 'scripts/prepare_github_preview_release.py'
+      - '.github/workflows/github-preview-update.yml'
+permissions:
+  contents: read
+jobs:
+  windows-preview-contract:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Build production and separately compiled test transports
+        shell: pwsh
+        run: |
+          cmake -S native/github-preview-update -B D:/gsw-preview/build -A x64 -DGSW_PREVIEW_ACCEPTANCE=ON
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build D:/gsw-preview/build --config Release --parallel 4
+          exit $LASTEXITCODE
+      - name: Check immutable source, prepare and refuse invalid updates
+        shell: pwsh
+        run: |
+          $env:TEMP='D:/gsw-preview/test-temp'; $env:TMP=$env:TEMP
+          New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+          python -I -B native/github-preview-update/test_github_preview.py D:/gsw-preview/build/Release/gsw_github_preview_fixture.exe
+          exit $LASTEXITCODE
+      - name: Exercise the shipped transport anonymously against the real public repository
+        shell: pwsh
+        run: |
+          $root='D:/gsw-preview/live-provider'; New-Item -ItemType Directory -Force -Path "$root/bin" | Out-Null
+          Copy-Item -LiteralPath 'D:/gsw-preview/build/Release/GSW GitHub Preview Update.exe' -Destination "$root/bin"
+          "[Installation]\nAppId=Fubukisama.GaussianSceneWorkbench.Native".Replace('\n',[Environment]::NewLine) | Set-Content -Encoding ascii "$root/gsw-installation.ini"
+          $raw=& "$root/bin/GSW GitHub Preview Update.exe" --check preview
+          if ($LASTEXITCODE) { throw "Live public check failed: $raw" }
+          $res=$raw | Select-Object -Last 1 | ConvertFrom-Json
+          if ($res.phase -notin @('current','available')) { throw 'No verified result from public repository' }
+          $raw

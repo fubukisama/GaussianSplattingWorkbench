@@ -1,0 +1,27 @@
+# The installed helper has no feed/CA/archive/root overrides. Only the
+# standalone remote acceptance target can compile the owned transport fixture.
+function(gsw_add_github_preview target)
+  set(root "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/..")
+  if(NOT TARGET gsw_preview_setup_waiter)
+    add_executable(gsw_preview_setup_waiter "${root}/src/NativePreviewSetupWaiter.cpp")
+    set_target_properties(gsw_preview_setup_waiter PROPERTIES OUTPUT_NAME "GSW Preview Setup Waiter"
+      MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_definitions(gsw_preview_setup_waiter PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(gsw_preview_setup_waiter PRIVATE shell32 ole32)
+  endif()
+  if(NOT TARGET gsw_preview_miniz)
+    add_library(gsw_preview_miniz STATIC "${root}/third_party/miniz/miniz.c")
+    target_include_directories(gsw_preview_miniz PUBLIC "${root}/third_party/miniz")
+  endif()
+  file(STRINGS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/sequence.txt" sequence LIMIT_COUNT 1)
+  add_executable(${target} "${root}/src/NativeGithubPreview.cpp" "${root}/src/NativeGithubPreviewFeed.cpp"
+    "${root}/src/NativeActivationCore.cpp")
+  target_compile_features(${target} PRIVATE cxx_std_20)
+  target_compile_definitions(${target} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE _WIN32_WINNT=0x0A00 GSW_PREVIEW_SEQUENCE=${sequence}LL)
+  target_compile_options(${target} PRIVATE /utf-8 /Zc:__cplusplus)
+  target_include_directories(${target} PRIVATE "${root}/src" "${root}/third_party/nlohmann")
+  target_link_libraries(${target} PRIVATE Qt6::Core gsw_preview_miniz winhttp ole32 shell32 uuid)
+  if(target STREQUAL "gsw_github_preview_update")
+    set_target_properties(${target} PROPERTIES OUTPUT_NAME "GSW GitHub Preview Update")
+  endif()
+endfunction()

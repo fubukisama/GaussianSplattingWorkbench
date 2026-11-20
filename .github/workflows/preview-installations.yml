@@ -1,0 +1,72 @@
+name: Installed GitHub preview acceptance
+on:
+  workflow_call:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  installed-preview:
+    name: Setup and managed updates through their original entries
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64
+          path: D:/gsw-preview-qa/payload
+          digest-mismatch: error
+      - uses: actions/download-artifact@v8
+        with:
+          name: Gaussian-Scene-Workbench-windows-x64-setup
+          path: D:/gsw-preview-qa/setup
+          digest-mismatch: error
+      - name: Build earlier source-bound transport for the controlled issuer only
+        shell: pwsh
+        run: |
+          cmake -S native/github-preview-update -B D:/gsw-preview-qa/build -A x64 -DGSW_PREVIEW_ACCEPTANCE=ON
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build D:/gsw-preview-qa/build --config Release --target gsw_github_preview_fixture --parallel 4
+          exit $LASTEXITCODE
+      - name: Prepare isolated remote display
+        shell: pwsh
+        run: |
+          ./scripts/setup_native_ci_display.ps1
+          ./scripts/setup_native_ci_graphics.ps1
+      - name: Run actual application from the original entries
+        shell: pwsh
+        run: |
+          $setup=@(Get-ChildItem D:/gsw-preview-qa/setup -Recurse -File -Filter '*-setup.exe')
+          if ($setup.Count -ne 1) { throw 'Expected exactly one product Setup' }
+          python -I -B native/github-preview-update/accept_installations.py --root D:/gsw-preview-qa/installations --package D:/gsw-preview-qa/payload --setup $setup[0].FullName --fixture D:/gsw-preview-qa/build/Release/gsw_github_preview_fixture.exe --release-dir D:/gsw-preview-qa/release --evidence D:/gsw-preview-qa/evidence
+          exit $LASTEXITCODE
+      - name: Retain owned diagnostic state on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $e='D:/gsw-preview-qa/evidence'
+          New-Item -Path $e -ItemType Directory -Force | Out-Null
+          Get-ChildItem 'D:/gsw-preview-qa/installations' -Filter prepared.json -Recurse -ErrorAction SilentlyContinue | Select-Object FullName,Length | ConvertTo-Json | Out-File "$e/markers.json"
+          Get-Process | Where-Object { $_.Path -like 'D:\gsw-preview-qa\*' } | Select-Object Id,ProcessName,Path,MainWindowTitle | ConvertTo-Json | Out-File "$e/owned-processes.json"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: installed-github-preview-evidence
+          path: D:/gsw-preview-qa/evidence/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Retain tested release inputs (no publishing permissions)
+        uses: actions/upload-artifact@v7
+        with:
+          name: github-windows-preview-release-inputs
+          path: D:/gsw-preview-qa/release/
+          if-no-files-found: error
+          retention-days: 30

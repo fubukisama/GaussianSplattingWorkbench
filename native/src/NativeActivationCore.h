@@ -35,6 +35,7 @@ private:
 
 class NativeUpdateTrustBridge;
 class NativeDeveloperPublisher;
+class NativeGithubPreview;
 
 // There is no public constructor taking a verified bool or arbitrary JSON.
 // Only the linked trust bridge can mint an online publisher admission.
@@ -64,8 +65,10 @@ public:
       const NativeInstallationLock &);
 private:
   friend class NativeDeveloperPublisher;
+  friend class NativeGithubPreview;
+  enum class Admission { Signed, LocalDeveloper, GithubPreview };
   static NativeActivationResult publish(const QString &root, const QString &archive,
-      const QByteArray &offer, const NativeInstallationLock &, bool developerAdmission,
+      const QByteArray &offer, const NativeInstallationLock &, Admission,
       const QString &descriptorSha256 = {});
 };
 

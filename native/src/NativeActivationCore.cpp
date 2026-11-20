@@ -80,7 +80,7 @@ NativeActivationResult NativeActivationCore::install(const QString &root, const 
     const NativeVerifiedUpdate &update, const NativeInstallationLock &lock) {
   if (QDir::cleanPath(root) != update.installationRoot || update.descriptorSha256.isEmpty() || update.historical)
     return {false, QStringLiteral("activation_admission_invalid"), {}};
-  return publish(root, archive, update.offer, lock, false, update.descriptorSha256);
+  return publish(root, archive, update.offer, lock, Admission::Signed, update.descriptorSha256);
 }
 NativeActivationResult NativeActivationCore::verifyInstalled(const QString &root, const NativeVerifiedUpdate &update,
     const NativeInstallationLock &lock) {
@@ -126,12 +126,14 @@ NativeActivationResult NativeActivationCore::rollback(const QString &root, const
     catch (...) { return {false, QStringLiteral("rollback_failed"), verified.buildId}; }
 }
 NativeActivationResult NativeActivationCore::publish(const QString &root, const QString &archive,
-    const QByteArray &offerBytes, const NativeInstallationLock &lock, bool developer, const QString &descriptorSha256) {
+    const QByteArray &offerBytes, const NativeInstallationLock &lock, Admission admission, const QString &descriptorSha256) {
+  const bool developer = admission == Admission::LocalDeveloper;
+  const bool githubPreview = admission == Admission::GithubPreview;
   QString id;
   try {
     if (!lock.locked() || lock.installationRoot() != QDir::cleanPath(root)) fail("activation_lock_required");
     if (!ordinary(root)) fail("activation_root_invalid");
-    if (developer) {
+    if (developer || githubPreview) {
       // The private adapter checks this before creating its lock and verifies
       // every protocol-1 bootstrap row under that lock. Repeat the trust-state
       // exclusion here: a developer admission must never mutate a public root.
@@ -156,11 +158,12 @@ NativeActivationResult NativeActivationCore::publish(const QString &root, const 
     if (product != QLatin1String("Fubukisama.GaussianSceneWorkbench.Native") &&
         product != QLatin1String("Fubukisama.GaussianSceneWorkbench.UpdateFixture")) fail("activation_product_invalid");
     id = buildId(offer.at("buildId"));
-    integer(offer.at("minimumBootstrapProtocol"), 2, 2);
+    integer(offer.at("minimumBootstrapProtocol"), githubPreview ? 1 : 2, githubPreview ? 1 : 2);
     const auto bootstrap = parse(read(QDir(root).filePath(QStringLiteral("bootstrap.json")), 16384), 16384);
     if (string(bootstrap.at("schema")) != QLatin1String("gsw.native_bootstrap/1")) fail("activation_bootstrap_invalid");
     const auto bootstrapProtocol = integer(bootstrap.at("protocol"), 1, 2);
-    if (bootstrapProtocol != 2 && !(developer && bootstrapProtocol == 1))
+    if (githubPreview && bootstrapProtocol != 1) fail("preview_trusted_root_forbidden");
+    if (bootstrapProtocol != 2 && !((developer || githubPreview) && bootstrapProtocol == 1))
       fail("activation_bootstrap_migration_required");
     const qint64 archiveLength = integer(offer.at("archiveLength"), 1, maxArchive);
     const qint64 expanded = integer(offer.at("unpackedLength"), 1, maxExpanded);
@@ -252,7 +255,7 @@ NativeActivationResult NativeActivationCore::publish(const QString &root, const 
     // already-installed file set must independently match this admitted offer.
     const auto installed = verifyInstalledSlot(slot, offer);
     if (installed.executableSha256 != entries[exe].sha256) fail("activation_slot_digest_mismatch");
-    Json receipt{{"schema", "gsw.native_activation_receipt/1"}, {"mode", developer ? "developer" : "online"},
+    Json receipt{{"schema", "gsw.native_activation_receipt/1"}, {"mode", githubPreview ? "github-preview" : developer ? "developer" : "online"},
       {"offer", offer}, {"manifestSha256", manifestHash.toStdString()}, {"executableSha256", entries[exe].sha256.toStdString()}};
     if (!developer) { sha(descriptorSha256); receipt["descriptorSha256"] = descriptorSha256.toStdString(); }
     durableWrite(QDir(receipts).filePath(id + QStringLiteral(".json")), QByteArray::fromStdString(receipt.dump()), true);

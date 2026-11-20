@@ -460,6 +460,15 @@ set_target_properties(GaussianSceneWorkbench PROPERTIES
 )
 
 include(GNUInstallDirs)
+if(WIN32)
+  enable_language(C)
+  include(github-preview-update/PreviewUpdate.cmake)
+  gsw_add_github_preview(gsw_github_preview_update)
+  add_dependencies(GaussianSceneWorkbench gsw_github_preview_update gsw_preview_setup_waiter)
+  install(TARGETS gsw_github_preview_update gsw_preview_setup_waiter RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  install(FILES github-preview-update/sequence.txt DESTINATION . RENAME gsw-preview-sequence.txt)
+  install(DIRECTORY github-preview-update DESTINATION source/native PATTERN "__pycache__" EXCLUDE)
+endif()
 install(TARGETS GaussianSceneWorkbench GaussianSceneWorkbenchLauncher
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
@@ -510,6 +519,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/native_i18n.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build_native.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/write_native_source_manifest.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/write_native_release_manifest.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/prepare_github_preview_release.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/package_native_update.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/publish_native_installation.ps1"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_installation.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/NATIVE_UPDATES.md" DESTINATION docs)

@@ -19,6 +19,8 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 
 ## 2026-11-20
 
+- **Windows 预览版更新：**向导安装和未接入正式信任源的托管安装均可检查本项目不可变的 GitHub 发布。开启自动下载后，已校验的新版在正常退出时安装；取消退出、包损坏或被 Windows 策略阻止时保留旧版。不要求商业代码签名证书，正式签名通道不变。[更新说明](docs/NATIVE_UPDATES.md#github-preview)
+
 - **稀疏重建预览：**关联数据集时即显示场景工具栏，首张点云快照不会把视口和属性栏向下挤；尚不可用的编辑操作仍禁用。连续稀疏快照沿用第一张有效点云的网格基准，点云真实范围照常更新；仍可导航和切换到世界零平面。本条为源码变更，不代表已发布或安装。
   [修复源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/6de4af73b99a8132f31eb333bd8db5e54bd0478c) · [回归诊断源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/fbecef12c4cf958a2660c1bf6cc9bd9ff8a918b6)
 

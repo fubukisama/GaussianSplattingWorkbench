@@ -1,5 +1,15 @@
 # Managed native updates / 原生版本更新 / ネイティブ版の更新
 
+## GitHub preview
+
+**简体中文：** Windows 向导版和没有正式信任配置的协议 1 托管版可在「帮助 → 软件更新 → 预览版」检查本项目的 GitHub Releases。首次使用本功能需要先安装一次带更新器的版本；从前的手动下载版不会自行获得这个能力。自动下载默认关闭。启用后，运行中只下载、核对不可变发布中的长度和 SHA-256；正常退出时重新确认并安装，取消退出不会应用。Setup 沿用已有目录，托管版发布独立版本目录并保留旧版；不会切换安装类型、强制关闭训练或改写项目。Windows 安全策略仍然生效。
+
+**English:** In **Help → Software Updates → Preview**, eligible Windows Setup and unanchored protocol-1 managed installations check the project's GitHub Releases. Install one updater-capable baseline first. Automatic download is opt-in. The client checks the immutable release, exact asset length and SHA-256, then rechecks the release and bytes on normal exit. A cancelled quit never applies the update. Setup retains the existing directory; managed updates retain the old version slot. No forced restart, training interruption or Windows security-policy override.
+
+**日本語：** Windows セットアップ版と本番の信頼設定を持たないプロトコル 1 の管理版では、「ヘルプ → ソフトウェア更新 → プレビュー版」で公式 GitHub Releases を確認できます。最初に対応版を一度インストールしてください。自動ダウンロードは任意です。変更不能なリリース、パッケージのサイズと SHA-256 を確認し、通常終了時に再確認して適用します。終了をキャンセルした場合は適用しません。導入先、作業中のプロジェクトと Windows の保護設定は変更しません。
+
+The preview trusts control of the pinned GitHub repository over HTTPS. A digest supplied by that service detects corruption; it is not independent publisher authentication. The signed protocol-2 updater never falls back to the GitHub adapter. Only immutable, non-draft prereleases tagged `vX.Y.Z-native-preview.YYYYMMDD.N` with both compatible artifacts and `gsw-windows-x64-preview.json` are eligible. Increment the build's `native/github-preview-update/sequence.txt` (YYYYMMDD plus a two-digit counter) before building the next release. Unmodified older tags remain manual downloads.
+
 ## 简体中文
 
 桌面、开始菜单、任务栏统一使用固定的原生启动器。已验证的新版本放入独立的

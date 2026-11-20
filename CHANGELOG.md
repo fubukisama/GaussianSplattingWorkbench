@@ -22,6 +22,8 @@ separate claims.
 
 ## 2026-11-20
 
+- **Windows preview updates:** Eligible Setup and unanchored managed installations can check this project's immutable GitHub Releases. With automatic download enabled, a verified newer preview is applied on normal exit; cancelling exit, a damaged package or a Windows policy refusal keeps the old version. Commercial Windows code signing is not required. The stable signed channel is unchanged. [Update guide](docs/NATIVE_UPDATES.md#github-preview)
+
 - **Sparse reconstruction preview:** The scene toolbar row is present once a dataset is attached, so the first point snapshot does not push the viewport and inspector down. Unavailable editing actions stay disabled. Successive sparse snapshots keep the first valid cloud's grid datum without freezing measured point bounds, navigation or the world-zero option. This source change is not a release or installation.
   [Fix source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/6de4af73b99a8132f31eb333bd8db5e54bd0478c) · [Regression probe source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/fbecef12c4cf958a2660c1bf6cc9bd9ff8a918b6)
 

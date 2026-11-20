@@ -699,3 +699,10 @@ jobs:
           path: native/diagnostic-artifact/
           if-no-files-found: error
           retention-days: 7
+
+  github-preview-installations:
+    needs: build
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/preview-installations.yml
