@@ -8,6 +8,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDockWidget>
+#include <QFile>
 #include <QFormLayout>
 #include <QHeaderView>
 #include <QImage>
@@ -540,6 +541,32 @@ void AppThemeTests::reusesOneScaledLayoutForBothThemes() {
       QStringLiteral("(?:QMainWindow::separator[^\\{]*|"
                      "QSplitter::handle(?=\\s*\\{\\s*background: #dedede;))"
                      "\\s*\\{[^\\}]*\\}\\s*"));
+  // A distinct resource name may describe ink only. Prove that for each
+  // allowlisted SVG before treating its URL like any other color token.
+  const auto svgWithoutInk = [](const QString &resource) {
+    QFile file(resource);
+    if (!file.open(QIODevice::ReadOnly)) return QString{};
+    const QByteArray bytes = file.readAll();
+    QString svg = QString::fromUtf8(bytes);
+    const QRegularExpression stroke(QStringLiteral("\\sstroke=\"(#[0-9a-fA-F]{6})\""));
+    const auto match = stroke.match(svg);
+    if (svg.toUtf8() != bytes || !match.hasMatch() || stroke.match(svg, match.capturedEnd()).hasMatch())
+      return QString{};
+    svg.replace(match.capturedStart(1), match.capturedLength(1), QStringLiteral("#000000"));
+    return svg;
+  };
+  const QStringList arrows{QStringLiteral("up"), QStringLiteral("down")};
+  const auto arrowResource = [](const QString &direction, const QString &ink) {
+    return QStringLiteral(":/icons/form-marks/%1-%2.svg").arg(direction, ink);
+  };
+  for (const auto &direction : arrows) {
+    const auto light = svgWithoutInk(arrowResource(direction, QStringLiteral("light")));
+    const auto dark = svgWithoutInk(arrowResource(direction, QStringLiteral("dark")));
+    QVERIFY2(!light.isEmpty() && !dark.isEmpty(), "Both grid arrow resources must have one explicit stroke color");
+    // This compares the view box, intrinsic size, transform, path, stroke
+    // width and all other bytes, not only the dimensions in the stylesheet.
+    QCOMPARE(light, dark);
+  }
   for (const int scale : {90, 100, 150}) {
     AppTheme::apply(*qApp, scale, false);
     AppTheme::applyTheme(*qApp, UiTheme::Dark, false);
@@ -551,6 +578,13 @@ void AppThemeTests::reusesOneScaledLayoutForBothThemes() {
     // dialog surfaces and transparent labels now share both themes' rules.
     lightGeometry.remove(dayPresentation);
     lightGeometry.remove(QRegularExpression(QStringLiteral("#[0-9a-fA-F]{6}")));
+    for (const auto &direction : arrows) {
+      const QString lightUrl = QStringLiteral("url(%1)").arg(arrowResource(direction, QStringLiteral("light")));
+      const QString darkUrl = QStringLiteral("url(%1)").arg(arrowResource(direction, QStringLiteral("dark")));
+      QVERIFY(lightGeometry.contains(lightUrl) && darkGeometry.contains(darkUrl));
+      QVERIFY(!lightGeometry.contains(darkUrl) && !darkGeometry.contains(lightUrl));
+      lightGeometry.replace(lightUrl, darkUrl);
+    }
     QCOMPARE(lightGeometry.trimmed(), darkGeometry.trimmed());
     QVERIFY(qApp->styleSheet().contains(QStringLiteral("QLabel#densityGuardWarning")));
   }

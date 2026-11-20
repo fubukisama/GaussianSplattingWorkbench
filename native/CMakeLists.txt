@@ -2015,6 +2015,7 @@ if(BUILD_TESTING)
       tests/AppThemeTests.cpp
       src/AppTheme.cpp
       src/AppTheme.h
+      lucide_icons.qrc
     )
     qt_add_executable(gsw_multi_item_list_tests
       tests/MultiItemListTests.cpp
