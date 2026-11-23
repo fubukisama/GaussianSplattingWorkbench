@@ -20,6 +20,10 @@ in the same change, with affected capabilities, limitations and verification or
 delivery status. Implementation, verification, publication and installation remain
 separate claims.
 
+## 2026-11-23
+
+- **Fixed:** A delayed older COLMAP snapshot no longer replaces a newer sparse preview during standalone reconstruction or 3DGS and 2DGS preparation. Newer observations may still contain fewer points, and the validated final point cloud takes precedence. Reconstruction and training outputs are unchanged.
+
 ## 2026-11-20
 
 - **Grid Settings and Viewport Details:** Check marks, drop-down arrows and numeric step arrows

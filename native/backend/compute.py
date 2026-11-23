@@ -4204,7 +4204,7 @@ def write_point_cloud_preview_ply(path, points):
 
 
 class ColmapPointCloudPreviewPublisher:
-    """Publish stable mapper snapshots as incrementally numbered point-cloud PLYs."""
+    """Publish new stable observations without replaying older mapper captures."""
 
     def __init__(
         self,
@@ -4232,7 +4232,7 @@ class ColmapPointCloudPreviewPublisher:
         self.stop_event = threading.Event()
         self.thread = None
         self.observed = {}
-        self.published_signatures = set()
+        self.last_published_order = None
         self.generation = 0
 
     def start(self):
@@ -4245,11 +4245,13 @@ class ColmapPointCloudPreviewPublisher:
         )
         self.thread.start()
 
-    def stop(self):
+    def stop(self, mapper_output=None):
         self.stop_event.set()
         if self.thread is not None:
             self.thread.join()
             self.thread = None
+        if mapper_output is not None:
+            self.source_roots.append(Path(mapper_output))
         self.publish_latest(force=True)
         self.prune()
 
@@ -4258,37 +4260,43 @@ class ColmapPointCloudPreviewPublisher:
             self.publish_latest(force=False)
 
     def candidates(self):
-        candidates = []
-        for root in self.source_roots:
-            if root.exists():
-                candidates.extend(root.rglob("points3D.bin"))
         unique = {}
-        for candidate in candidates:
-            try:
-                stat = candidate.stat()
-            except OSError:
+        # Sources are added in workflow order: live snapshots, completed mapper
+        # output, then validated undistorted output. Later stages take priority
+        # even if COLMAP or a filesystem copy preserves an earlier write time.
+        for phase, root in enumerate(self.source_roots):
+            if not root.exists():
                 continue
-            unique[str(candidate.resolve())] = (
-                candidate,
-                stat.st_mtime_ns,
-                stat.st_size,
-            )
-        return sorted(
-            unique.values(), key=lambda item: (item[1], item[2]), reverse=True
-        )
+            for candidate in root.rglob("points3D.bin"):
+                try:
+                    stat = candidate.stat()
+                    identity = str(candidate.resolve())
+                except OSError:
+                    continue
+                folder = candidate.parent.name
+                # COLMAP WriteSnapshot uses a millisecond timestamp formatted
+                # as %010zu. The width is a minimum; never sort it lexically.
+                capture = (int(folder) if phase == 0 and candidate.parent.parent == root
+                           and 10 <= len(folder) <= 20 and folder.isascii() and folder.isdigit() else None)
+                order = (phase, capture is not None,
+                         capture if capture is not None else stat.st_mtime_ns,
+                         0 if capture is not None else stat.st_size)
+                unique[identity] = (order, identity, candidate, stat.st_mtime_ns, stat.st_size)
+        return sorted(unique.values(), key=lambda item: item[:2], reverse=True)
 
     def publish_latest(self, force=False):
-        for candidate, modified_ns, size in self.candidates():
-            signature = (str(candidate.resolve()), modified_ns, size)
-            if signature in self.published_signatures:
-                continue
-            previous = self.observed.get(signature[0])
-            self.observed[signature[0]] = (modified_ns, size)
-            if not force and previous != (modified_ns, size):
+        for order, identity, candidate, modified_ns, size in self.candidates():
+            if self.last_published_order is not None and order <= self.last_published_order:
+                break
+            signature = (modified_ns, size)
+            previous = self.observed.get(identity)
+            self.observed[identity] = signature
+            if not force and previous != signature:
                 continue
             try:
                 source_count, points = read_colmap_points3d_binary(candidate)
-                if source_count <= 0 or not points:
+                stat = candidate.stat()
+                if source_count <= 0 or not points or (stat.st_mtime_ns, stat.st_size) != signature:
                     continue
                 generation = self.generation + 1
                 output = self.output_dir / f"sparse_{generation:06d}.ply"
@@ -4297,7 +4305,7 @@ class ColmapPointCloudPreviewPublisher:
                 continue
 
             self.generation = generation
-            self.published_signatures.add(signature)
+            self.last_published_order = order
             lock = MESH_LOCK if mesh_like_job_kind(self.job) else TRAIN_LOCK
             with lock:
                 self.job["latest_iteration"] = generation
@@ -4899,10 +4907,7 @@ def run_colmap_convert(job, dataset, options):
             try:
                 run_logged(job, command, ROOT, "3dgs")
             finally:
-                preview_publisher.source_roots.append(
-                    dataset / "distorted" / "sparse"
-                )
-                preview_publisher.stop()
+                preview_publisher.stop(dataset / "distorted" / "sparse")
         if commands:
             validate_undistorted_colmap_output(undistort_staging)
             validation = reconstruction_quality.assess_model(undistort_staging / "sparse" / "0", selected["inputImages"])
@@ -4912,7 +4917,7 @@ def run_colmap_convert(job, dataset, options):
             (undistort_staging / "sparse" / "0" / "reconstruction_quality.json").write_text(json.dumps(dict(validation, candidates=reports), indent=2), encoding="utf-8")
             publish_undistorted_colmap_output(dataset, undistort_staging, backup=planned["backup"])
             if preview_publisher is not None:
-                preview_publisher.source_roots.append(dataset / "sparse")
+                preview_publisher.source_roots.append(dataset / "sparse" / "0")
                 preview_publisher.publish_latest(force=True)
                 preview_publisher.prune()
         else:
