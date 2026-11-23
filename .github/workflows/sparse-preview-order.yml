@@ -11,6 +11,9 @@ on:
         description: Reproduce on the pinned old code instead of testing current main
         type: boolean
         default: false
+      candidate:
+        description: Optional detached candidate commit for focused validation before pushing main
+        type: string
 
 permissions:
   contents: read
@@ -24,6 +27,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          persist-credentials: false
+      - name: Check detached candidate scope before executing its worker
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate != ''
+        shell: pwsh
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+          WITNESS: ${{ inputs.witness }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:WITNESS -eq 'true' -or $env:CANDIDATE -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid candidate.' }
+          $candidate = gh api "repos/$env:GITHUB_REPOSITORY/git/commits/$env:CANDIDATE" | ConvertFrom-Json
+          if ($LASTEXITCODE -or @($candidate.parents).Count -ne 1 -or $candidate.parents[0].sha -cne $env:GITHUB_SHA) { throw 'The candidate must directly extend the checked-in test source.' }
+          $scope = gh api "repos/$env:GITHUB_REPOSITORY/compare/$env:GITHUB_SHA...$env:CANDIDATE" | ConvertFrom-Json
+          if ($LASTEXITCODE -or $scope.total_commits -ne 1 -or (@($scope.files.filename | Sort-Object) -join ',') -cne 'CHANGELOG.ja.md,CHANGELOG.md,CHANGELOG.zh-CN.md,native/backend/compute.py') {
+            throw 'Detached preview-order candidate has changes outside the expected files.'
+          }
+      - uses: actions/checkout@v7
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate != ''
+        with:
+          ref: ${{ inputs.candidate }}
+          path: candidate
           persist-credentials: false
       - uses: actions/checkout@v7
         if: inputs.witness
@@ -39,6 +63,7 @@ jobs:
         shell: pwsh
         env:
           WITNESS: ${{ inputs.witness }}
+          CANDIDATE: ${{ inputs.candidate }}
           PYTHONDONTWRITEBYTECODE: '1'
           PYTHONUTF8: '1'
           CUDA_VISIBLE_DEVICES: '-1'
@@ -55,6 +80,8 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           if ($env:WITNESS -eq 'true') {
             python -I -B .github/scripts/sparse_preview_order.py --source ./baseline --root $root --witness
+          } elseif ($env:CANDIDATE) {
+            python -I -B .github/scripts/sparse_preview_order.py --source ./candidate --root $root --commit $env:CANDIDATE
           } else {
             python -I -B .github/scripts/sparse_preview_order.py --source . --root $root
           }
