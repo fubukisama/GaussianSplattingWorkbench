@@ -211,6 +211,8 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/BackendLocator.h
   src/CameraTrajectory.cpp
   src/CameraTrajectory.h
+  src/CameraPhotoIO.cpp
+  src/CameraPhotoIO.h
   src/CameraDatasetInfo.cpp
   src/CameraDatasetInfo.h
   src/ColmapSupport.cpp
@@ -254,6 +256,7 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/ImportEnvironmentProbe.cpp
   src/ImportEnvironmentProbe.h
   src/MainWindow.cpp
+  src/MainWindowCameraPhotos.cpp
   src/MainWindow.h
   src/TaskRecord.cpp
   src/TaskRecord.h
@@ -1768,7 +1771,7 @@ if(BUILD_TESTING)
     # Exercise real viewport presentation without showing a window or creating
     # a GL context. Locale changes must never announce geometry/data mutations.
     qt_add_executable(gsw_native_viewport_locale_tests tests/NativeViewportLocaleTests.cpp lucide_icons.qrc)
-    foreach(source AppLanguage AppTheme WorkbenchIcons NativeViewport RenderFrameDiagnostics CameraTrajectory SceneCoordinates
+    foreach(source AppLanguage AppTheme WorkbenchIcons NativeViewport RenderFrameDiagnostics CameraTrajectory CameraPhotoIO SceneCoordinates
         ReferenceAxisGeometry FrameRateCounter GaussianDepthSorter GaussianGpuBuffer
         ModelInteraction NavigationGizmo PlyPointCloudLoader PointCloudCache MeshCache
         SceneEditModel ScreenSpaceSelection TrainingGpuPreviewProtocol TrainingGpuPreviewBuffer

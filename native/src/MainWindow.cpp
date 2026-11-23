@@ -975,6 +975,7 @@ MainWindow::MainWindow(QWidget *parent)
   createActions();
   createProjectDock();
   createInspectorDock();
+  createCameraPhotoDock();
   createTaskDock();
   createMenus();
   createToolBars();
@@ -1015,6 +1016,11 @@ MainWindow::MainWindow(QWidget *parent)
 }
 
 MainWindow::~MainWindow() {
+  ++*mCameraPhotoViewEpoch;
+  if (mCameraPhotoInspection) {
+    mCameraPhotoInspection->disconnect(this);
+    mCameraPhotoInspection->kill();
+  }
   mProcessSupervisor.shutdown();
   if (mDiscardRecoveryOnDestruction) {
     discardCurrentRecovery();
@@ -1630,19 +1636,46 @@ void MainWindow::createActions() {
     mViewport->setRenderMode(NativeViewport::RenderMode::Points);
   });
 
-  mShowCamerasAction = AppLanguage::text(new QAction(QCoreApplication::translate("Workbench", "相机轨迹"), this), AppLanguage::source("相机轨迹"));
+  mShowCamerasAction = AppLanguage::text(new QAction(this), AppLanguage::source("显示相机"));
   mShowCamerasAction->setObjectName(QStringLiteral("showCamerasAction"));
   mShowCamerasAction->setCheckable(true);
   mShowCamerasAction->setChecked(
       QSettings().value(QStringLiteral("view/showCameras"), false).toBool());
   mShowCamerasAction->setEnabled(false);
-  AppLanguage::bind(mShowCamerasAction, "toolTip", AppLanguage::source("显示 cameras.json 中的相机视锥和拍摄路径"));
+  AppLanguage::bind(mShowCamerasAction, "toolTip", AppLanguage::source("在相机位姿处显示小型相机牌；不改变场景坐标。"));
   mViewport->setShowCameras(mShowCamerasAction->isChecked());
   connect(mShowCamerasAction, &QAction::toggled, this,
           [this](const bool enabled) {
             QSettings().setValue(QStringLiteral("view/showCameras"), enabled);
             mViewport->setShowCameras(enabled);
+            refreshCameraPhotoBinding();
           });
+  const auto addCameraOption = [this](const char *label, const char *id,
+                                   const QString &key, auto setter) {
+    auto *action = AppLanguage::text(new QAction(this), label);
+    action->setObjectName(QString::fromLatin1(id));
+    action->setCheckable(true);
+    action->setChecked(QSettings().value(key, false).toBool());
+    action->setEnabled(false);
+    (mViewport->*setter)(action->isChecked());
+    connect(action, &QAction::toggled, this, [this,key,setter](bool enabled) {
+      QSettings().setValue(key, enabled);
+      (mViewport->*setter)(enabled);
+      refreshCameraPhotoBinding();
+    });
+    return action;
+  };
+  mShowCameraPhotosAction = addCameraOption(AppLanguage::source("照片缩略图"),
+      "showCameraPhotosAction", QStringLiteral("view/showCameraPhotos"),
+      &NativeViewport::setShowCameraPhotos);
+  AppLanguage::bind(mShowCameraPhotosAction, "toolTip", AppLanguage::source("在相机牌显示可核实的照片；双击相机牌查看原图。"));
+  mShowCameraFrustumsAction = addCameraOption(AppLanguage::source("完整视锥"),
+      "showCameraFrustumsAction", QStringLiteral("view/showCameraFrustums"),
+      &NativeViewport::setShowCameraFrustums);
+  mShowCameraOrderAction = addCameraOption(AppLanguage::source("相机连线（按记录顺序）"),
+      "showCameraRecordOrderAction", QStringLiteral("view/showCameraRecordOrder"),
+      &NativeViewport::setShowCameraRecordOrder);
+  AppLanguage::bind(mShowCameraOrderAction, "toolTip", AppLanguage::source("记录顺序不一定是实际拍摄路线。"));
 
   mTaskPreviewAction = AppLanguage::text(new QAction(this), AppLanguage::source("任务预览"));
   mTaskPreviewAction->setObjectName(QStringLiteral("taskPreviewAction"));
@@ -2214,7 +2247,14 @@ void MainWindow::createMenus() {
     mViewport->setMaximumShDegree(action->data().toInt());
     QSettings().setValue(QStringLiteral("view/maximumShDegree"), mViewport->maximumShDegree());
   });
-  viewMenu->addAction(mShowCamerasAction);
+  auto *cameraMenu = AppLanguage::text(viewMenu->addMenu(QString()), AppLanguage::source("相机显示"), "title");
+  cameraMenu->setObjectName(QStringLiteral("cameraDisplayMenu"));
+  cameraMenu->addAction(mShowCamerasAction);
+  cameraMenu->addAction(mShowCameraPhotosAction);
+  cameraMenu->addAction(mShowCameraFrustumsAction);
+  cameraMenu->addAction(mShowCameraOrderAction);
+  cameraMenu->addSeparator();
+  cameraMenu->addAction(mCameraPhotoDock->toggleViewAction());
   QMenu *referencePlaneMenu =
       AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "基准面网格")), AppLanguage::source("基准面网格"), "title");
   setWorkbenchActionIcon(referencePlaneMenu->menuAction(), WorkbenchIconId::Scene, palette());
@@ -3047,6 +3087,8 @@ void MainWindow::remapTaskOutputDirectories(const QString &oldRoot, const QStrin
 void MainWindow::connectServices() {
   connect(&mWorkspace, &WorkspaceDocument::changed, this,
           &MainWindow::updateWorkspaceUi);
+  connect(&mWorkspace, &WorkspaceDocument::changed, this,
+          [this] { refreshCameraPhotoBinding(); });
   connect(&mWorkspace, &WorkspaceDocument::changed, this,
           &MainWindow::checkpointCurrentRecovery);
   connect(&mWorkspace, &WorkspaceDocument::changed, this,
@@ -3927,6 +3969,10 @@ void MainWindow::connectServices() {
         mCameraSourcePath = sourcePath;
         mCameraTrajectoryError = error;
         mShowCamerasAction->setEnabled(cameraCount > 0);
+        mShowCameraPhotosAction->setEnabled(cameraCount > 0);
+        mShowCameraFrustumsAction->setEnabled(cameraCount > 0);
+        mShowCameraOrderAction->setEnabled(cameraCount > 0);
+        refreshCameraPhotoBinding(true);
         updateInspector();
         rebuildProjectTree();
 
@@ -7316,6 +7362,94 @@ void MainWindow::resumeTrainingJob(const ActiveTrainingJob &active, const QStrin
       appendTaskEvent(rollbackError);
     updateTrainingActions();
   }
+}
+
+void MainWindow::refreshCameraPhotoBinding(const bool newTrajectory) {
+  if (!mCameraPhotoDock || !mShowCameraPhotosAction) return;
+  const auto dataset = mWorkspace.datasetPath();
+  const auto scene = mViewport->scenePath();
+  const auto modelIdentity = mViewport->cameraInputDataIdentity();
+  const bool requested = (mShowCamerasAction->isChecked() && mShowCameraPhotosAction->isChecked()) ||
+                         mCameraPhotoDock->isVisible();
+  const auto key = QStringList{mWorkspace.rootPath(), dataset, mWorkspace.cameraDatasetIdentity(),
+      scene, mWorkspace.activeSceneId(), mCameraSourcePath, modelIdentity,
+      requested ? QStringLiteral("photos") : QStringLiteral("cards")}.join(QLatin1Char('\n'));
+  if (!newTrajectory && key == mCameraPhotoLookupKey) return;
+  mCameraPhotoLookupKey = key;
+  if (newTrajectory) mCameraPhotoSelected = -1;
+  ++*mCameraPhotoViewEpoch;
+  mCameraPhotoLegacy = false;
+  if (mCameraPhotoInspection) {
+    auto *old = std::exchange(mCameraPhotoInspection, nullptr);
+    old->disconnect(this);
+    old->kill();
+    old->deleteLater();
+  }
+  mViewport->setCameraPhotoDataset(dataset, mWorkspace.cameraDatasetIdentity());
+  if (mCameraPhotoDock->isVisible()) rebuildCameraPhotoList();
+  if (!requested || !modelIdentity.isEmpty() || mViewport->cameraCount() <= 0 ||
+      dataset.isEmpty() || scene.isEmpty() || !pathsReferToSameLocation(scene, mWorkspace.scenePath())) return;
+
+  // A loose model or a neighboring cameras.json may not choose a photo root.
+  // For unbound COLMAP records admit only the exact retained experiment in
+  // the current workspace, whose camera record and result are in its output.
+  const auto source = QFileInfo(mCameraSourcePath).canonicalFilePath();
+  qsizetype owners = 0;
+  for (const auto &experiment : GenerationHistoryStore(mWorkspace.rootPath()).records()) {
+    if (experiment.status != QStringLiteral("completed") || experiment.pipeline != QStringLiteral("training") ||
+        experiment.resultSceneId != mWorkspace.activeSceneId() ||
+        (experiment.backend != QStringLiteral("3dgs") && experiment.backend != QStringLiteral("2dgs")) ||
+        !pathsReferToSameLocation(experiment.resultPath, scene) ||
+        !pathsReferToSameLocation(experiment.datasetPath, dataset)) continue;
+    const auto output = QDir(experiment.outputRoot).canonicalPath();
+    if (!output.isEmpty() && source.startsWith(output + QLatin1Char('/'), Qt::CaseInsensitive)) ++owners;
+  }
+  if (owners != 1) return;
+  const auto root = BackendLocator::findRepositoryRoot(QCoreApplication::applicationDirPath(),
+                                                       qEnvironmentVariable("GSW_BACKEND_ROOT"));
+  const auto python = findTrainingPython(root);
+  if (root.isEmpty() || python.isEmpty()) return;
+  const auto env = pythonProcessEnvironment(python);
+  if (!env.ready()) return;
+  auto *process = new QProcess(this);
+  mCameraPhotoInspection = process;
+  auto stdoutBytes = std::make_shared<QByteArray>();
+  process->setProgram(python);
+  process->setWorkingDirectory(root);
+  process->setProcessEnvironment(env.environment);
+  process->setArguments({QStringLiteral("-B"), QDir(root).filePath(QStringLiteral("native/worker/reconstruction_review.py")),
+      QStringLiteral("--backend-root"), root, QStringLiteral("--dataset"), dataset,
+      QStringLiteral("--group"), QStringLiteral("sparse/0")});
+  connect(process, &QProcess::readyReadStandardOutput, this, [process, stdoutBytes] {
+    *stdoutBytes += process->readAllStandardOutput();
+    if (stdoutBytes->size() > 32 * 1024 * 1024) process->kill();
+  });
+  connect(process, &QProcess::readyReadStandardError, this, [process] { process->readAllStandardError(); });
+  connect(process, &QProcess::errorOccurred, this, [this,process](QProcess::ProcessError error) {
+    if (error != QProcess::FailedToStart || mCameraPhotoInspection != process) return;
+    mCameraPhotoInspection = nullptr;
+    process->deleteLater();
+    refreshCameraPhotoCaption();
+  });
+  connect(process, qOverload<int,QProcess::ExitStatus>(&QProcess::finished), this,
+      [this,process,stdoutBytes,key,dataset](int code, QProcess::ExitStatus status) {
+        if (mCameraPhotoInspection != process) return;
+        mCameraPhotoInspection = nullptr;
+        *stdoutBytes += process->readAllStandardOutput();
+        process->deleteLater();
+        if (mCameraPhotoLookupKey == key && status == QProcess::NormalExit && code == 0 &&
+            stdoutBytes->size() <= 32 * 1024 * 1024) {
+          const auto report = QJsonDocument::fromJson(*stdoutBytes).object();
+          if (pathsReferToSameLocation(report.value(QStringLiteral("dataset")).toString(), dataset)) {
+            mCameraPhotoLegacy = true;
+            mViewport->setCameraPhotoReview(report);
+          }
+        }
+        refreshCameraPhotoCaption();
+      });
+  QTimer::singleShot(30000, process, [process] { if (process->state() != QProcess::NotRunning) process->kill(); });
+  process->start();
+  refreshCameraPhotoCaption();
 }
 
 void MainWindow::startMeshGeneration() {

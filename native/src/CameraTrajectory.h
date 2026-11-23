@@ -11,6 +11,7 @@ namespace gsw {
 
 struct CameraPose final {
   QString imageName;
+  QString imageSha256;
   QString viewId;
   QString split;
   QString coordinateFrame;
@@ -36,7 +37,15 @@ struct CameraLineSegment final {
   QVector3D end;
 };
 
+struct CameraImagePlane final {
+  qsizetype cameraIndex;
+  QVector3D position;
+  QVector3D rightExtent;
+  QVector3D downExtent;
+};
+
 struct CameraTrajectoryGeometry final {
+  QList<CameraImagePlane> imagePlanes;
   QList<CameraLineSegment> frustums;
   QList<CameraLineSegment> path;
   qsizetype displayedFrustumCameraCount = 0;
@@ -51,6 +60,7 @@ public:
 
   [[nodiscard]] const QList<CameraPose> &cameras() const;
   [[nodiscard]] QString sourcePath() const;
+  [[nodiscard]] QString inputDataIdentity() const { return mInputDataIdentity; }
   [[nodiscard]] QString error() const;
   [[nodiscard]] qsizetype invalidCameraCount() const;
   [[nodiscard]] bool metadataVerified() const;
@@ -65,6 +75,7 @@ public:
 private:
   QList<CameraPose> mCameras;
   QString mSourcePath;
+  QString mInputDataIdentity;
   QString mError;
   QString mMetadataErrorCode;
   qsizetype mInvalidCameraCount = 0;

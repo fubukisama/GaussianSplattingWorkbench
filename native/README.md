@@ -106,7 +106,23 @@ remain separate.
 
 The current viewport includes a native Gaussian preview, but it is not yet a production tile rasterizer. It projects each 3D covariance to a 2D EWA ellipse, sorts preview splats by camera depth after navigation, and composites premultiplied alpha. View-dependent SH 0–4 uses the pinned gsplat evaluator adapted to GLSL. Coefficient buffers remain resident while navigating or switching display degree. GPU tile sorting/culling and GPU timing remain pending; displayed FPS is viewport frame cadence, not a GPU timing query. Live shared-GPU training previews still supply DC only; PLY snapshots can supply full SH. See `docs/STUDIO_COMPARISON.md` for memory/device limits and remaining priorities.
 
-Camera metadata is optional. When a scene is loaded, the desktop searches the scene directory and its parents for the nearest standard 3DGS `cameras.json`; a missing sidecar does not prevent the scene from opening, while an unreadable or malformed sidecar is reported to the user. Loading runs outside the UI thread, invalid entries are counted and skipped, and very long trajectories are evenly decimated for display while retaining the full source count. Reopening the same scene refreshes a repaired sidecar. The camera-trajectory control shows or hides the camera frustums and ordered capture path together. Pressing `Home` resets the view around the loaded scene center.
+Camera metadata is optional. Model-bound metadata takes precedence over a legacy
+`cameras.json`. A missing sidecar does not prevent a scene from opening.
+Metadata loads off the UI thread, and large camera sets are decimated for display
+without discarding their source poses. In **View → Camera Display**, **Show
+Cameras** marks each displayed pose with a compact, oriented blue card.
+**Photo Thumbnails**, **Full View Frusta**, and **Connect Cameras (Record
+Order)** are separate options; record order is not evidence of capture order.
+
+In observation mode, click a card to select it and double-click to read its
+linked photo in **Camera Photos**. **Go to camera** uses the stored pose without
+changing model coordinates. Photo reads require a model/dataset match or a
+scoped reconstruction review with a complete relative name and matching pose.
+A missing or changed file, or a loose model without sufficient provenance,
+retains the plain card. Legacy reads verify current reconstruction snapshots;
+without historical hashes they cannot reproduce training-time image bytes.
+Thumbnails decode off-thread on demand; switching scenes cannot publish the
+previous scene's pending image. Press `Home` to reset the view around the scene.
 
 Rectangle, lasso, and brush selection operate on every source vertex even when display rendering is sampled. The brush shows its exact screen-space radius, persists the chosen size, and uses the same visible-only filter and original-index edit model; GPU ID picking remains pending.
 

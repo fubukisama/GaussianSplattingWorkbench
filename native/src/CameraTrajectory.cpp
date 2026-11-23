@@ -143,6 +143,8 @@ bool parseBoundCamera(const QJsonObject &object, const QString &frame, const QSt
       !matrix(object.value(QStringLiteral("c2w_opencv")), 4, pose) || !properRotation(pose, 4) ||
       std::abs(pose[12]) > 1e-12 || std::abs(pose[13]) > 1e-12 || std::abs(pose[14]) > 1e-12 || std::abs(pose[15]-1.) > 1e-12) return false;
   camera->imageName = object.value(QStringLiteral("image_path")).toString();
+  const auto imageDigest = object.value(QStringLiteral("sha256")).toString();
+  if (validDigest(imageDigest)) camera->imageSha256 = imageDigest;
   camera->viewId = id; camera->split = split;
   camera->coordinateFrame = frame; camera->coordinateUnit = unit;
   camera->pixelCoordinates = pixels;
@@ -162,7 +164,7 @@ bool parseBoundCamera(const QJsonObject &object, const QString &frame, const QSt
 
 struct BoundTrajectory {
   bool present = false;
-  QString source, error, frame, unit;
+  QString source, error, frame, unit, inputDataIdentity;
   QList<CameraPose> cameras;
   QJsonObject clipping;
   qsizetype invalid = 0;
@@ -370,6 +372,7 @@ BoundTrajectory readBoundTrajectory(const QString &scenePath) {
       transforms.value(QStringLiteral("canonical_to_training")).toObject().value(QStringLiteral("applied"))!=QJsonValue(true)) {
     result.error=QStringLiteral("camera_metadata_contract_invalid");return result;
   }
+  result.inputDataIdentity = contractIdentity;
   std::optional<RecordedFrameTransforms> editedFrames;
   if(root.value(QStringLiteral("export_version"))==3) {
     editedFrames=recordedExportFrameTransforms(root,&result.error);
@@ -411,11 +414,27 @@ BoundTrajectory readBoundTrajectory(const QString &scenePath) {
     result.error=QStringLiteral("camera_metadata_clipping_invalid");return result;
   }
   QSet<QString> identifiers;
+  // Display-only provenance comes from the verified training contract, not
+  // from a filename or a mutable neighboring cameras.json.
+  QHash<QString, QPair<QString, QString>> contractPhotos;
+  QSet<QString> ambiguousPhotos;
+  for (const auto &viewValue : contract.value(QStringLiteral("views")).toArray()) {
+    const auto view = viewValue.toObject();
+    const auto id = view.value(QStringLiteral("view_id")).toString();
+    const auto path = view.value(QStringLiteral("image_path")).toString();
+    const auto digest = view.value(QStringLiteral("sha256")).toString();
+    if (id.isEmpty()) continue;
+    if (contractPhotos.contains(id)) ambiguousPhotos.insert(id);
+    else contractPhotos.insert(id, {path, digest});
+  }
   for (const auto &value : bundle.value(QStringLiteral("views")).toArray()) {
     CameraPose camera;
     if (!value.isObject() || !parseBoundCamera(value.toObject(), result.frame, result.unit, &camera) || identifiers.contains(camera.viewId)) {
       ++result.invalid; result.cameras.clear(); result.error = QStringLiteral("camera_metadata_view_invalid"); return result;
     }
+    const auto photo = contractPhotos.value(camera.viewId);
+    camera.imageSha256 = !ambiguousPhotos.contains(camera.viewId) &&
+        photo.first == camera.imageName && validDigest(photo.second) ? photo.second : QString();
     identifiers.insert(camera.viewId); result.cameras.append(camera);
   }
   if(editedFrames) {
@@ -595,6 +614,7 @@ CameraTrajectory CameraTrajectory::loadForScene(const QString &scenePath) {
       trajectory.mMetadataErrorCode = bound.error;
     } else {
       trajectory.mCameras = bound.cameras;
+      trajectory.mInputDataIdentity = bound.inputDataIdentity;
       trajectory.mMetadataVerified = true;
     }
     return trajectory;
@@ -735,11 +755,18 @@ CameraTrajectoryGeometry CameraTrajectory::geometry(const float sceneRadius) con
     return displayedIndex * (cameraCount - 1) / (displayedCount - 1);
   };
 
+  result.imagePlanes.reserve(frustumCameraCount);
   result.frustums.reserve(frustumCameraCount * 8);
   for (qsizetype displayedIndex = 0;
        displayedIndex < frustumCameraCount; ++displayedIndex) {
-    const CameraPose &camera =
-        mCameras.at(sourceIndex(displayedIndex, frustumCameraCount));
+    const qsizetype index = sourceIndex(displayedIndex, frustumCameraCount);
+    const CameraPose &camera = mCameras.at(index);
+    const float imageWidth = camera.width > 0 ? float(camera.width) : 1.0F;
+    const float imageHeight = camera.height > 0 && camera.width > 0
+                                  ? float(camera.height) : imageWidth * 0.65F;
+    const float normalizer = std::max(imageWidth, imageHeight);
+    result.imagePlanes.append({index, camera.position,
+        camera.right * (imageWidth / normalizer), camera.imageDown * (imageHeight / normalizer)});
     const float aspectHeight =
         camera.width > 0 && camera.height > 0
             ? size * static_cast<float>(camera.height) /

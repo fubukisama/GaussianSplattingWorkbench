@@ -3,6 +3,7 @@
 #include "ReferenceAxisGeometry.h"
 
 #include "CameraTrajectory.h"
+#include "CameraPhotoIO.h"
 #include "FrameRateCounter.h"
 #include "GaussianDepthSorter.h"
 #include "GaussianGpuBuffer.h"
@@ -41,6 +42,7 @@
 #include <QVector3D>
 
 #include <array>
+#include <atomic>
 #include <optional>
 
 class QMouseEvent;
@@ -55,6 +57,7 @@ class QShowEvent;
 class QHideEvent;
 class QLabel;
 class QToolButton;
+class QFileSystemWatcher;
 
 namespace gsw {
 
@@ -123,6 +126,16 @@ public:
   [[nodiscard]] bool sceneObjectVisible(const QString &id) const;
   [[nodiscard]] qsizetype visibleSceneObjectCount() const;
   void setShowCameras(bool enabled);
+  void setShowCameraFrustums(bool enabled);
+  void setShowCameraRecordOrder(bool enabled);
+  void setShowCameraPhotos(bool enabled);
+  void setCameraPhotoDataset(const QString &root, const QString &inputIdentity);
+  void setCameraPhotoReview(const QJsonObject &report);
+  [[nodiscard]] QString cameraInputDataIdentity() const;
+  [[nodiscard]] QString cameraPhotoName(qsizetype index) const;
+  [[nodiscard]] QString cameraPhotoViewId(qsizetype index) const;
+  [[nodiscard]] CameraPhotoReference cameraPhotoReference(qsizetype index) const;
+  [[nodiscard]] bool highlightCameraPhoto(qsizetype index);
   void setInteractionMode(InteractionMode mode);
   void setEditToolsLocked(bool locked);
   [[nodiscard]] bool editToolsLocked() const { return mEditToolsLocked; }
@@ -321,6 +334,8 @@ signals:
                                qsizetype invalidCameraCount,
                                bool displayDecimated, const QString &sourcePath,
                                const QString &error);
+  void cameraPhotoContextChanged();
+  void cameraCardActivated(qsizetype index, bool openPhoto);
   void trainingGpuPreviewStateChanged(bool active, const QString &mode,
                                       const QString &detail);
   void interactionModeChanged(gsw::NativeViewport::InteractionMode mode);
@@ -634,6 +649,19 @@ private:
                            float logicalLineWidth,
                            GLenum primitiveMode = GL_LINES,
                            bool writeDepth = true);
+  struct ProjectedCameraCard final {
+    qsizetype index;
+    QPolygonF plane;
+    QPointF center;
+    float depth;
+  };
+  [[nodiscard]] QList<ProjectedCameraCard> projectCameraCards(
+      const QMatrix4x4 &viewProjection) const;
+  [[nodiscard]] qsizetype cameraCardAt(const QPointF &position) const;
+  [[nodiscard]] bool cameraPhotoContextMatches() const;
+  void replaceCameraPhotoReferences(QHash<qsizetype, CameraPhotoReference> references);
+  void queueCameraThumbnails(const QList<ProjectedCameraCard> &cards);
+  void readNextCameraThumbnail();
   void drawCameraTrajectory(QPainter &painter,
                             const QMatrix4x4 &viewProjection);
   void drawSelectionGesture(QPainter &painter);
@@ -794,6 +822,22 @@ private:
   bool mReconstructionReviewOnly = false;
   bool mReviewCameraAuthorized = false;
   bool mShowCameras = false;
+  bool mShowCameraFrustums = false;
+  bool mShowCameraRecordOrder = false;
+  bool mShowCameraPhotos = false;
+  bool mCameraThumbPumpQueued = false;
+  bool mCameraThumbBusy = false;
+  qsizetype mHighlightedCameraPhoto = -1;
+  qsizetype mCameraCardPress = -1;
+  QPointF mCameraCardPressPosition;
+  std::weak_ptr<SceneState> mCameraPhotoScene;
+  int mCameraPhotoTrajectoryGeneration = -1;
+  QHash<qsizetype, CameraPhotoReference> mCameraPhotoReferences;
+  QHash<qsizetype, CameraPhotoRead> mCameraThumbnails;
+  QList<qsizetype> mWantedCameraThumbnails;
+  std::shared_ptr<std::atomic<quint64>> mCameraPhotoEpoch =
+      std::make_shared<std::atomic<quint64>>(0);
+  QFileSystemWatcher *mCameraPhotoFiles = nullptr;
   bool mGaussianShaderReady = false;
   bool mMeshShaderReady = false;
   bool mGridShaderReady = false;

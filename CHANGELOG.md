@@ -22,6 +22,14 @@ separate claims.
 
 ## 2026-11-23
 
+- **Camera display and real photos.** The viewport displays compact oriented blue
+  camera cards instead of a dense frustum-and-line overlay. Thumbnails, full
+  frusta and record-order lines are independent. Select a card or an image to
+  find its counterpart and view the verified photo in the app. Photo access is
+  scoped to the bound dataset; missing, changed, and unbound photos leave a
+  plain camera card. This changes display, not calibration, model transforms
+  or training. Build, runtime verification, release and install evidence remain separate.
+
 - **Managed Windows preview:** A separate starter ZIP provides a stable launcher and versioned updates. A verified update is applied on normal exit after automatic download is enabled. Classic Setup now checks for updates but is run manually from the official release page, avoiding unattended launch of a downloaded installer. The signed stable route is unchanged. [Update guide](docs/NATIVE_UPDATES.md#github-preview)
 
 - **Fixed:** A delayed older COLMAP snapshot no longer replaces a newer sparse preview during standalone reconstruction or 3DGS and 2DGS preparation. Newer observations may still contain fewer points, and the validated final point cloud takes precedence. Reconstruction and training outputs are unchanged.

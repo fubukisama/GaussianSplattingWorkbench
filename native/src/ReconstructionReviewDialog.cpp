@@ -1,18 +1,17 @@
 #include "ReconstructionReviewDialog.h"
 #include "AppLanguage.h"
+#include "CameraPhotoIO.h"
 #include "NativeViewport.h"
+#include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
-#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGridLayout>
 #include <QHeaderView>
 #include <QHideEvent>
-#include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
@@ -31,9 +30,6 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 #include <atomic>
-#ifdef Q_OS_WIN
-#include <qt_windows.h>
-#endif
 namespace gsw {
 namespace {
 QString text(const char *s) { return QCoreApplication::translate("Workbench",s); }
@@ -55,29 +51,6 @@ QString reasonText(const QString &code) {
   if(code==QStringLiteral("input_mismatch"))return text(AppLanguage::source("输入照片数量不匹配"));
   return text(AppLanguage::source("模型文件无效"));
 }
-bool containedFile(const QString &root,const QString &relative) {
-  if(relative.isEmpty()||relative.contains(QLatin1Char('\\'))||relative.contains(QLatin1Char(':'))||QDir::isAbsolutePath(relative))return false;
-  QString ancestor=QDir(root).absolutePath();
-  for(;;) {
-    const QFileInfo info(ancestor);if(info.isSymLink())return false;
-#ifdef Q_OS_WIN
-    const DWORD attributes=GetFileAttributesW(reinterpret_cast<LPCWSTR>(ancestor.utf16()));
-    if(attributes!=INVALID_FILE_ATTRIBUTES&&(attributes&FILE_ATTRIBUTE_REPARSE_POINT))return false;
-#endif
-    const auto parent=info.absoluteDir().absolutePath();if(parent==ancestor)break;ancestor=parent;
-  }
-  if(QDir(root).canonicalPath().compare(QDir::cleanPath(root),Qt::CaseInsensitive)!=0)return false;
-  QString path=root;
-  for(const auto &part:relative.split(QLatin1Char('/'))) {
-    if(part.isEmpty()||part==QStringLiteral(".")||part==QStringLiteral(".."))return false;
-    path=QDir(path).filePath(part);const QFileInfo info(path);if(info.isSymLink())return false;
-#ifdef Q_OS_WIN
-    const DWORD a=GetFileAttributesW(reinterpret_cast<LPCWSTR>(path.utf16()));
-    if(a!=INVALID_FILE_ATTRIBUTES&&(a&FILE_ATTRIBUTE_REPARSE_POINT))return false;
-#endif
-  }
-  return QFileInfo(path).isFile()&&QFileInfo(path).canonicalFilePath().startsWith(QDir(root).canonicalPath()+QLatin1Char('/'),Qt::CaseInsensitive);
-}
 class Filter final : public QSortFilterProxyModel {
 public:
   QString status, search;
@@ -94,12 +67,14 @@ class ReconstructionReviewDialog::State {
 public:
   QString dataset,python,backend,camera,identity,modelDirectory;QProcessEnvironment environment;
   QJsonObject report;QProcess *process=nullptr;quint64 generation=0,imageGeneration=0;
+  QHash<QString, CameraPhotoReference> photoRefs;
   QThreadPool *imagePool=nullptr;std::shared_ptr<std::atomic<quint64>> imageEpoch=std::make_shared<std::atomic<quint64>>(0);
   QByteArray output; bool pending=false,expired=false;
   QLabel *summary=nullptr,*groupInfo=nullptr,*details=nullptr,*image=nullptr;
   QComboBox *groups=nullptr,*filter=nullptr;QLineEdit *search=nullptr;
   QTableView *table=nullptr;QStandardItemModel *model=nullptr;Filter *proxy=nullptr;
   QPushButton *locate=nullptr,*photo=nullptr,*restore=nullptr;NativeViewport *viewport=nullptr;QSplitter *split=nullptr;
+  QCheckBox *showPhotos=nullptr;
 };
 ReconstructionReviewDialog::ReconstructionReviewDialog(const QString &dataset,const QString &python,const QString &backend,
     const QProcessEnvironment &environment,const QString &camera,const QString &identity,QWidget *parent)
@@ -126,7 +101,31 @@ ReconstructionReviewDialog::ReconstructionReviewDialog(const QString &dataset,co
   auto *right=new QWidget(m->split);auto *rightLayout=new QVBoxLayout(right);
   m->image=new QLabel(right);m->image->setObjectName(QStringLiteral("reviewThumbnail"));m->image->setAlignment(Qt::AlignCenter);m->image->setMinimumHeight(120);m->image->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);rightLayout->addWidget(m->image);
   m->details=new QLabel(right);m->details->setObjectName(QStringLiteral("reviewDetails"));m->details->setTextFormat(Qt::PlainText);m->details->setWordWrap(true);rightLayout->addWidget(m->details);
+  m->showPhotos=AppLanguage::text(new QCheckBox(right),AppLanguage::source("照片缩略图"));
+  m->showPhotos->setObjectName(QStringLiteral("reviewShowCameraPhotos"));
+  m->showPhotos->setEnabled(false);
+  rightLayout->addWidget(m->showPhotos);
   m->viewport=new NativeViewport(right);m->viewport->setObjectName(QStringLiteral("reviewSparseViewport"));m->viewport->setEditToolsLocked(true);m->viewport->setMinimumSize(220,180);rightLayout->addWidget(m->viewport,1);
+  connect(m->showPhotos,&QCheckBox::toggled,m->viewport,&NativeViewport::setShowCameraPhotos);
+  connect(m->viewport,&NativeViewport::cameraCardActivated,this,[this](qsizetype index,bool open){
+    if(m->expired||m->pending||stale()){invalidate();return;}
+    const auto id=m->viewport->cameraPhotoViewId(index);
+    for(int i=0;i<m->model->rowCount();++i) {
+      const auto source=m->model->index(i,0);
+      if(source.data(Qt::UserRole).toJsonObject().value(QStringLiteral("id")).toString()!=id)continue;
+      auto row=m->proxy->mapFromSource(source);
+      if(!row.isValid()) {
+        m->filter->setCurrentIndex(0);
+        m->search->clear();
+        row=m->proxy->mapFromSource(source);
+      }
+      if(!row.isValid())return;
+      m->table->setCurrentIndex(row);
+      m->table->scrollTo(row);
+      if(open&&m->photo->isEnabled())loadImage(true);
+      return;
+    }
+  });
   auto *notice=AppLanguage::text(new QLabel(body),AppLanguage::source("独立稀疏预览；不会替换主模型。注册比例不是完整度或几何精度。未注册原因未记录时为未知；逐图误差不可用。"));notice->setWordWrap(true);bodyLayout->addWidget(notice);
   auto *buttons=new QGridLayout;layout->addLayout(buttons);
   m->photo=AppLanguage::text(new QPushButton(this),AppLanguage::source("查看原图"));m->photo->setObjectName(QStringLiteral("reviewOpenPhoto"));buttons->addWidget(m->photo,0,0);
@@ -163,7 +162,7 @@ bool ReconstructionReviewDialog::stale()const {
   for(auto i=directories.begin();i!=directories.end();++i)if(QFileInfo(QDir(root).filePath(i.key())).lastModified().toMSecsSinceEpoch()!=i.value().toString().toLongLong()/1000000)return true;
   return false;
 }
-void ReconstructionReviewDialog::invalidate(){m->expired=true;++m->imageGeneration;m->imageEpoch->store(m->imageGeneration);m->imagePool->clear();m->image->clear();m->locate->setEnabled(false);m->photo->setEnabled(false);m->viewport->restoreSourceCameraView();m->viewport->setEnabled(false);refreshLanguage();}
+void ReconstructionReviewDialog::invalidate(){m->expired=true;++m->imageGeneration;m->imageEpoch->store(m->imageGeneration);m->imagePool->clear();m->photoRefs.clear();m->image->clear();m->locate->setEnabled(false);m->photo->setEnabled(false);m->showPhotos->setEnabled(false);m->viewport->setCameraPhotoDataset({},{});m->viewport->restoreSourceCameraView();m->viewport->setEnabled(false);refreshLanguage();}
 void ReconstructionReviewDialog::inspect(const QString &group){m->expired=false;request(group);}
 void ReconstructionReviewDialog::setModelDirectory(const QString &directory){cancel();m->modelDirectory=directory;m->report={};}
 void ReconstructionReviewDialog::request(const QString &group,const QString &action,const QString &rowId) {
@@ -192,10 +191,13 @@ void ReconstructionReviewDialog::request(const QString &group,const QString &act
       if(action==QStringLiteral("locate")) (void)m->viewport->setReviewCameraView(rowId);
       selectCurrent();emit inspectionFinished();return;
     }
-    m->report=report;m->expired=false;m->image->clear();m->model->removeRows(0,m->model->rowCount());
+    m->report=report;m->expired=false;m->photoRefs=cameraPhotoReferences(report);m->image->clear();m->model->removeRows(0,m->model->rowCount());
     {QSignalBlocker block(m->groups);m->groups->clear();for(const auto &g:report.value(QStringLiteral("groups")).toArray()){const QString id=g.toObject().value(QStringLiteral("id")).toString();m->groups->addItem(id,QVariant(id));}m->groups->setCurrentIndex(m->groups->findData(report.value(QStringLiteral("selectedGroup")).toString()));}
     for(const auto &v:report.value(QStringLiteral("rows")).toArray()) {QList<QStandardItem*> items;for(int i=0;i<6;++i)items.append(new QStandardItem);items[0]->setData(v.toObject(),Qt::UserRole);m->model->appendRow(items);}
-    m->proxy->apply();m->table->setEnabled(true);m->viewport->setEnabled(m->viewport->setReconstructionReviewData(report));refreshLanguage();selectCurrent();emit inspectionFinished();
+    m->proxy->apply();m->table->setEnabled(true);m->viewport->setEnabled(m->viewport->setReconstructionReviewData(report));
+    m->viewport->setCameraPhotoReview(report);
+    m->showPhotos->setEnabled(m->viewport->isEnabled()&&!m->photoRefs.isEmpty());
+    refreshLanguage();selectCurrent();emit inspectionFinished();
   });
   QTimer::singleShot(30000,process,[this,process,generation]{if(generation==m->generation&&m->process==process){cancel();invalidate();emit inspectionFinished();}});
   process->start();
@@ -223,31 +225,35 @@ void ReconstructionReviewDialog::refreshLanguage() {
 void ReconstructionReviewDialog::selectCurrent() {
   const auto index=m->proxy->mapToSource(m->table->currentIndex());const auto row=index.isValid()?m->model->item(index.row(),0)->data(Qt::UserRole).toJsonObject():QJsonObject();
   const bool valid=!m->pending&&!m->expired&&!row.isEmpty();
-  m->locate->setEnabled(valid&&m->viewport->isEnabled()&&row.value(QStringLiteral("pose")).isObject());m->photo->setEnabled(valid&&row.value(QStringLiteral("imagePath")).isString());
+  m->locate->setEnabled(valid&&m->viewport->isEnabled()&&row.value(QStringLiteral("pose")).isObject());
+  m->photo->setEnabled(valid&&m->photoRefs.contains(row.value(QStringLiteral("id")).toString()));
   m->details->setText(row.isEmpty()?QString():text(AppLanguage::source("照片：%1\n%2\n定位：%3\n位姿/路径诊断（原始标识）：%4"))
       .arg(row.value(QStringLiteral("name")).toString(),stateText(row.value(QStringLiteral("status")).toString()),m->locate->isEnabled()?text(AppLanguage::source("在本分组独立预览中定位")):text(AppLanguage::source("无已验证位姿或坐标关系，不能定位")),row.value(QStringLiteral("poseReason")).toString()));
-  if(valid&&row.value(QStringLiteral("imagePath")).isString())loadImage(false);
+  if(m->photo->isEnabled())loadImage(false);
+  else {
+    ++m->imageGeneration;
+    m->imageEpoch->store(m->imageGeneration);
+    m->imagePool->clear();
+    m->image->clear();
+  }
 }
 void ReconstructionReviewDialog::locate(){if(!m->locate->isEnabled())return;if(stale()){invalidate();return;}const auto row=m->proxy->index(m->table->currentIndex().row(),0).data(Qt::UserRole).toJsonObject();m->viewport->beginReviewNavigation();request(m->report.value(QStringLiteral("selectedGroup")).toString(),QStringLiteral("locate"),row.value(QStringLiteral("id")).toString());}
 void ReconstructionReviewDialog::loadImage(bool fullSize) {
   if(m->expired||m->pending)return;
   const auto row=m->proxy->index(m->table->currentIndex().row(),0).data(Qt::UserRole).toJsonObject();
-  const QString relative=row.value(QStringLiteral("imagePath")).toString(),root=m->report.value(QStringLiteral("dataset")).toString();if(relative.isEmpty())return;
-  QString expected;for(const auto &v:m->report.value(QStringLiteral("snapshots")).toArray()){const auto s=v.toObject();if(s.value(QStringLiteral("path"))==relative)expected=s.value(QStringLiteral("sha256")).toString();}
+  const auto ref=m->photoRefs.value(row.value(QStringLiteral("id")).toString());
+  const auto relative=ref.relativePath;if(relative.isEmpty())return;
+  m->image->clear();
   const auto generation=++m->imageGeneration;const auto epoch=m->imageEpoch;epoch->store(generation);m->imagePool->clear();auto *watcher=new QFutureWatcher<QImage>(this);
-  connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,generation,fullSize,relative]{const auto image=watcher->result();watcher->deleteLater();if(generation!=m->imageGeneration||m->expired||!isVisible())return;
+  connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,generation,fullSize,relative]{watcher->deleteLater();if(generation!=m->imageGeneration||m->expired||!isVisible())return;
+    const auto image=watcher->future().resultCount()>0?watcher->result():QImage();
     if(image.isNull()){m->image->setText(text(AppLanguage::source("原图不可读、已变化或超过预览预算。")));return;}
     if(!fullSize){m->image->setPixmap(QPixmap::fromImage(image));return;}
     QDialog viewer(this);viewer.setObjectName(QStringLiteral("reviewOriginalImageDialog"));viewer.setProperty("reviewOriginalPath",relative);viewer.setWindowTitle(relative);auto *layout=new QVBoxLayout(&viewer);auto *label=new QLabel(&viewer);label->setObjectName(QStringLiteral("reviewOriginalImagePixels"));label->setPixmap(QPixmap::fromImage(image));label->setAlignment(Qt::AlignCenter);layout->addWidget(label);viewer.resize(image.size().boundedTo(QSize(1280,900)));viewer.exec();
   });
-  watcher->setFuture(QtConcurrent::run(m->imagePool,[root,relative,expected,fullSize,epoch,generation]{
-    const auto cancelled=[&]{return epoch->load()!=generation;};if(cancelled())return QImage();
-    if(expected.size()!=64||!containedFile(root,relative))return QImage();QFile file(QDir(root).filePath(relative));
-    if(!file.open(QIODevice::ReadOnly)||file.size()>256*1024*1024)return QImage();QCryptographicHash hash(QCryptographicHash::Sha256);
-    while(!file.atEnd()){if(cancelled())return QImage();const auto block=file.read(1024*1024);if(block.isEmpty()&&file.error()!=QFile::NoError)return QImage();hash.addData(block);}
-    if(cancelled()||QString::fromLatin1(hash.result().toHex())!=expected||!containedFile(root,relative)||!file.seek(0))return QImage();
-    QImageReader reader(&file);reader.setAutoTransform(true);const auto size=reader.size();if(!size.isValid()||qint64(size.width())*size.height()>64000000)return QImage();
-    reader.setScaledSize(size.scaled(fullSize?QSize(1280,900):QSize(240,160),Qt::KeepAspectRatio));return reader.read();
+  watcher->setFuture(QtConcurrent::run(m->imagePool,[ref,fullSize,epoch,generation]{
+    return readCameraPhoto(ref,fullSize?QSize(1280,900):QSize(240,160),
+        [epoch,generation]{return epoch->load()!=generation;}).pixels;
   }));
 }
 }
