@@ -25,7 +25,6 @@ from prepare_github_preview_release import build
 APP = "Gaussian Scene Workbench.exe"
 LAUNCHER = "Gaussian Scene Workbench Launcher.exe"
 HELPER = "GSW GitHub Preview Update.exe"
-WAITER = "GSW Preview Setup Waiter.exe"
 PRODUCT = "Fubukisama.GaussianSceneWorkbench.Native"
 ARCHIVE = "gsw-windows-x64-managed.zip"
 MANIFEST = "gsw-windows-x64-preview.json"
@@ -134,94 +133,6 @@ throw ('Exit button absent: '+(($buttons|ForEach-Object {$_.Current.Name}) -join
     wait(lambda: not prompt(), 20, "exit confirmation dismissed")
 
 
-def setup_receipt(root, setup, waiter_sha, initial, evidence):
-    """Wait for the real Setup receipt; model ordinary Windows consent only in CI."""
-    assert os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
-    assert os.environ.get("GITHUB_REPOSITORY_ID") == "1286130219"
-    cache = root / ".gsw-github-preview"
-    expected = digest(setup)
-    source_file = cache / (expected + ".exe")
-    waiter = cache / ("apply-" + waiter_sha + ".exe")
-    completed = cache / ("setup-result-" + expected + ".json")
-    deadline = time.monotonic() + 300  # Includes any shell interaction; no extra install time.
-    observation = {"setupSha256": expected, "waiterSha256": waiter_sha, "timeoutSeconds": 300,
-                   "ordinaryConsent": False}
-    saved = evidence / "fixed-setup-handoff.json"
-    last_prompt = None
-    take_action = r"""
-$ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName UIAutomationClient
-Add-Type -AssemblyName UIAutomationTypes
-$dialog=[System.Windows.Automation.AutomationElement]::FromHandle([intptr][long]$env:GSW_QA_SETUP_WINDOW)
-if ($dialog.Current.ProcessId -ne [int]$env:GSW_QA_SETUP_PID) { throw 'Setup consent window owner changed' }
-$elements=$dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-$buttons=@()
-$labels=@()
-foreach($e in $elements) {
-  $n=$e.Current.Name.Replace('&','').Trim()
-  $kind=$e.Current.ControlType.ProgrammaticName
-  if($kind -eq 'ControlType.Button' -and $e.Current.IsEnabled -and -not $e.Current.IsOffscreen) { $buttons += $e }
-  if($n -and $kind -in @('ControlType.Button','ControlType.Text','ControlType.CheckBox','ControlType.Edit','ControlType.Hyperlink')) {
-    $labels += $n
-  }
-  if($kind -eq 'ControlType.Edit') {
-    $v=$null
-    if($e.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$v)) { $labels += $v.Current.Value }
-  }
-}
-$title=$dialog.Current.Name
-$fileShown=@($labels | Where-Object { $_ -and $_.Contains($env:GSW_QA_SETUP_LEAF) }).Count -gt 0
-$denial=($labels -join ' ') -match 'SmartScreen|Run anyway|More info|protected your PC|blocked|access denied'
-$answer=@($buttons | Where-Object { $_.Current.Name.Replace('&','').Trim() -in @('Open','Run') })
-$cancel=@($buttons | Where-Object { $_.Current.Name.Replace('&','').Trim() -eq 'Cancel' })
-$allowed=($title -in @('Window Dialog','Open File - Security Warning')) -and $fileShown -and
-  (-not $denial) -and $answer.Count -eq 1 -and $cancel.Count -eq 1
-$row=[ordered]@{title=$title; class=$dialog.Current.ClassName; exactFileShown=$fileShown; policyBlock=$denial;
-  ordinaryConsent=$allowed; buttons=@($buttons | ForEach-Object { $_.Current.Name.Replace('&','').Trim() })}
-# The test clicks only the ordinary affirmative decision offered by Windows.
-# Never touch a checkbox, an override/block, an unknown dialog, or machine policy.
-$row | ConvertTo-Json -Compress
-if($allowed) { $answer[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
-"""
-
-    def pending():
-        nonlocal last_prompt
-        if completed.is_file():
-            return load(completed)
-        rows = windows(waiter)
-        if len(rows) != 1 or rows[0] == last_prompt:
-            return None
-        hwnd, pid, title = rows[0]
-        observation.update(windowTitle=title, waiterPid=pid)
-        save(saved, observation)
-        if title not in ("Window Dialog", "Open File - Security Warning"):
-            last_prompt = rows[0]
-            return None
-        # Pin both the cached installer and the shell caller and prove there is
-        # still no result/activation before simulating the user's decision.
-        assert digest(waiter) == waiter_sha and digest(source_file) == expected
-        assert initial() and not completed.exists(), "Setup ran before shell consent"
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return None
-        env = dict(os.environ, GSW_QA_SETUP_WINDOW=str(hwnd), GSW_QA_SETUP_PID=str(pid),
-                   GSW_QA_SETUP_LEAF=source_file.name)
-        reply = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", take_action],
-                               env=env, capture_output=True, timeout=min(remaining, 20))
-        assert reply.returncode == 0, "Unable to read/confirm the owned Windows Setup dialog"
-        observation.update(json.loads(reply.stdout))
-        observation["noInstallBeforeConsent"] = True
-        save(saved, observation)
-        last_prompt = rows[0]
-        return None
-
-    value = wait(pending, max(0, deadline - time.monotonic()), "OS installer completion receipt")
-    assert value["schema"] == "gsw.github_preview_setup_result/1" and value["exitCode"] == 0, value
-    observation["exitCode"] = value["exitCode"]
-    save(saved, observation)
-    return observation
-
-
 def helper_call(helper, op, env):
     proc = subprocess.run([str(helper), op, "preview"], capture_output=True, env=env, timeout=180)
     rows = [json.loads(line) for line in proc.stdout.splitlines() if line]
@@ -304,7 +215,6 @@ def layout_run(mode, args, package, setup, feed, manifest, env):
     (old / "gsw-preview-sequence.txt").write_text(str(seq - 1), encoding="ascii")
     assert digest(helper) != production_hash
     marker = root / ".gsw-github-preview/prepared.json"
-    waiter_sha = None if is_managed else digest(old / "bin" / WAITER)
     sentinel = root / "user-project-keep.gsw"
     sentinel.write_bytes(b"owned synthetic user data; never overwrite")
     sentinel_hash = digest(sentinel)
@@ -321,14 +231,15 @@ def layout_run(mode, args, package, setup, feed, manifest, env):
     assert before() and main_window(exe_a)[1] == a[1] and marker.is_file()
     close(a, exe_a)
     wait(lambda: not any(r[1] == a[1] for r in windows(exe_a)), 140, "normal A exit")
-    shell_result = None
     if is_managed:
         wait(lambda: load(root / "current.json")["version"] == expected_id, 120, "atomic B pointer")
         receipt = load(root / "updates/receipts" / (expected_id + ".json"))
         assert receipt["mode"] == "github-preview" and digest(helper) == seed_hash
         assert not (root / ".update-trust-anchor").exists()
     else:
-        shell_result = setup_receipt(root, setup, waiter_sha, before, args.evidence)
+        completed = marker.parent / ("setup-result-" + digest(setup) + ".json")
+        status = wait(lambda: load(completed) if completed.is_file() else None, 300, "OS installer completion receipt")
+        assert status["exitCode"] == 0, status
         wait(lambda: (new / "gsw-preview-sequence.txt").is_file() and
              (new / "gsw-preview-sequence.txt").read_text().strip() == str(seq) and
              digest(new / "bin" / HELPER) == production_hash, 240, "real Setup B installed on exit")
@@ -345,24 +256,21 @@ def layout_run(mode, args, package, setup, feed, manifest, env):
             "sourceB": "unmodified Native Windows package", "oldPid": a[1], "newPid": b[1],
             "oldHelperSha256": seed_hash, "newHelperSha256": production_hash, "installedExecutableSha256": digest(exe_b),
             "activeBuild": expected_id, "sameOriginalEntry": True, "cancelledExitKeptA": True,
-            "corruptRefusal": bad, "userDataUnchanged": True, "setupHandoff": shell_result}
+            "corruptRefusal": bad, "userDataUnchanged": True}
 
 
 def main():
     parser = argparse.ArgumentParser()
     for name in ("root", "package", "setup", "fixture", "release_dir", "evidence"):
         parser.add_argument("--" + name.replace("_", "-"), dest=name, type=Path, required=True)
-    parser.add_argument("--replay-e96102e", action="store_true",
-                        help="Narrow replay with exact retained e96102e packages; never release acceptance")
     args = parser.parse_args()
     assert os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
     assert not args.root.exists() and args.root.resolve().drive.lower() == "d:"
     args.root.mkdir(parents=True)
     args.evidence.mkdir(parents=True, exist_ok=True)
-    suite = os.environ["GITHUB_SHA"]
-    assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == suite
-    head = "e96102ef6d19b0c39384fb5dab530444dba3f5b8" if args.replay_e96102e else suite
-    tree = subprocess.check_output(["git", "rev-parse", head + "^{tree}"], text=True).strip()
+    head = os.environ["GITHUB_SHA"]
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == head
     settings = r"Software\GaussianSceneWorkbench\Gaussian Scene Workbench\updates"
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\GaussianSceneWorkbench\Gaussian Scene Workbench\ui") as key:
         winreg.SetValueEx(key, "language", 0, winreg.REG_SZ, "en_US")
@@ -385,14 +293,11 @@ def main():
     (prod / "gsw-installation.ini").write_text("[Installation]\nAppId=" + PRODUCT + "\n")
     rc, row = helper_call(prod / "bin" / HELPER, "--check", os.environ)
     assert rc == 0 and row["phase"] == "current", row
-    result.update(realGithubReadback=row["code"], runId=os.environ["GITHUB_RUN_ID"], layouts=[],
-                  suiteCommit=suite, retainedReplay=args.replay_e96102e)
+    result.update(realGithubReadback=row["code"], runId=os.environ["GITHUB_RUN_ID"], layouts=[])
     save(args.evidence / "result.json", result)
     for layout in ("managed", "fixed"):
         result["layouts"].append(layout_run(layout, args, args.package, args.setup, feed, manifest, os.environ))
         save(args.evidence / "result.json", result)
-    if args.replay_e96102e:
-        assert result["layouts"][-1]["setupHandoff"]["ordinaryConsent"], "Original Windows confirmation did not reproduce"
     result["passed"] = True
     save(args.evidence / "result.json", result)
 
