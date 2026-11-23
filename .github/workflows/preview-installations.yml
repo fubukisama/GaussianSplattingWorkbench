@@ -1,6 +1,13 @@
 name: Installed GitHub preview acceptance
 on:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      replay_e96102e:
+        description: Replay the failed e96102e installation using its exact retained CI artifacts
+        type: boolean
+        required: true
+        default: true
 permissions:
   contents: read
   actions: read
@@ -11,6 +18,40 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: ${{ inputs.replay_e96102e && '0' || '1' }}
+          persist-credentials: false
+      - name: Bind the focused replay to the original failed run and unchanged production source
+        if: inputs.replay_e96102e
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $baseline='e96102ef6d19b0c39384fb5dab530444dba3f5b8'
+          $oldRun=44729280401
+          if($env:GITHUB_REPOSITORY_ID -ne '1286130219' -or $env:GITHUB_REF -ne 'refs/heads/main' -or
+              (git rev-parse "$baseline^{tree}") -cne 'b90c0433ea491b5d1f9aa62df82bdc681cfb86c1') { throw 'Replay identity differs' }
+          # The concurrent sparse-preview reproducer is diagnostics only; it
+          # is not part of either installed product or of this replay.
+          $allowed=@('.github/workflows/preview-installations.yml','native/github-preview-update/accept_installations.py',
+              '.github/workflows/sparse-preview-order.yml','.github/scripts/sparse_preview_order.py')
+          $delta=@(git diff --name-only $baseline $env:GITHUB_SHA)
+          if($LASTEXITCODE -or -not $delta -or @($delta | Where-Object {$_ -cnotin $allowed}).Count) {
+            throw 'Retained replay is only valid when the production source is unchanged'
+          }
+          $api="repos/$env:GITHUB_REPOSITORY/actions"
+          $run=gh api "$api/runs/$oldRun" | ConvertFrom-Json
+          if($LASTEXITCODE -or $run.head_sha -cne $baseline -or $run.conclusion -ne 'failure' -or
+              $run.path -ne '.github/workflows/native-windows.yml') { throw 'Original failing run does not match' }
+          $hashes=@{
+            '14630328673'='sha256:510abe76da34b3ef39b87f3c0849a7f374e16b9a8954dcdc45dbde2da6e38e1d'
+            '14630079338'='sha256:b5af0a5b0febc412f645aba152421450e3ec6339828979a13e58161a4bae5885'
+          }
+          foreach($id in $hashes.Keys){
+            $a=gh api "$api/artifacts/$id" | ConvertFrom-Json
+            if($LASTEXITCODE -or $a.expired -or $a.workflow_run.id -ne $oldRun -or
+                $a.workflow_run.head_sha -cne $baseline -or $a.digest -cne $hashes[$id]) { throw "Mismatched artifact $id" }
+          }
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -21,12 +62,18 @@ jobs:
           cache: true
       - uses: actions/download-artifact@v8
         with:
-          name: Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64
+          name: ${{ !inputs.replay_e96102e && 'Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64' || '' }}
+          artifact-ids: ${{ inputs.replay_e96102e && '14630328673' || '' }}
+          run-id: ${{ inputs.replay_e96102e && '44729280401' || github.run_id }}
+          github-token: ${{ inputs.replay_e96102e && github.token || '' }}
           path: D:/gsw-preview-qa/payload
           digest-mismatch: error
       - uses: actions/download-artifact@v8
         with:
-          name: Gaussian-Scene-Workbench-windows-x64-setup
+          name: ${{ !inputs.replay_e96102e && 'Gaussian-Scene-Workbench-windows-x64-setup' || '' }}
+          artifact-ids: ${{ inputs.replay_e96102e && '14630079338' || '' }}
+          run-id: ${{ inputs.replay_e96102e && '44729280401' || github.run_id }}
+          github-token: ${{ inputs.replay_e96102e && github.token || '' }}
           path: D:/gsw-preview-qa/setup
           digest-mismatch: error
       - name: Build earlier source-bound transport for the controlled issuer only
@@ -43,10 +90,14 @@ jobs:
           ./scripts/setup_native_ci_graphics.ps1
       - name: Run actual application from the original entries
         shell: pwsh
+        env:
+          REPLAY_E96102E: ${{ inputs.replay_e96102e }}
         run: |
           $setup=@(Get-ChildItem D:/gsw-preview-qa/setup -Recurse -File -Filter '*-setup.exe')
           if ($setup.Count -ne 1) { throw 'Expected exactly one product Setup' }
-          python -I -B native/github-preview-update/accept_installations.py --root D:/gsw-preview-qa/installations --package D:/gsw-preview-qa/payload --setup $setup[0].FullName --fixture D:/gsw-preview-qa/build/Release/gsw_github_preview_fixture.exe --release-dir D:/gsw-preview-qa/release --evidence D:/gsw-preview-qa/evidence
+          $replay=@()
+          if($env:REPLAY_E96102E -eq 'true'){ $replay+='--replay-e96102e' }
+          python -I -B native/github-preview-update/accept_installations.py --root D:/gsw-preview-qa/installations --package D:/gsw-preview-qa/payload --setup $setup[0].FullName --fixture D:/gsw-preview-qa/build/Release/gsw_github_preview_fixture.exe --release-dir D:/gsw-preview-qa/release --evidence D:/gsw-preview-qa/evidence @replay
           exit $LASTEXITCODE
       - name: Retain owned diagnostic state on failure
         if: failure()
@@ -64,6 +115,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Retain tested release inputs (no publishing permissions)
+        if: ${{ !inputs.replay_e96102e }}
         uses: actions/upload-artifact@v7
         with:
           name: github-windows-preview-release-inputs
