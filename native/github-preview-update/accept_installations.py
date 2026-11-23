@@ -25,7 +25,6 @@ from prepare_github_preview_release import build
 APP = "Gaussian Scene Workbench.exe"
 LAUNCHER = "Gaussian Scene Workbench Launcher.exe"
 HELPER = "GSW GitHub Preview Update.exe"
-WAITER = "GSW Preview Setup Waiter.exe"
 PRODUCT = "Fubukisama.GaussianSceneWorkbench.Native"
 ARCHIVE = "gsw-windows-x64-managed.zip"
 MANIFEST = "gsw-windows-x64-preview.json"
@@ -215,15 +214,6 @@ def layout_run(mode, args, package, setup, feed, manifest, env):
     (helper.parent / "gsw-fixture-issuer.txt").write_text(str(feed), encoding="utf-8")
     (old / "gsw-preview-sequence.txt").write_text(str(seq - 1), encoding="ascii")
     assert digest(helper) != production_hash
-    if args.isolated_setup_waiter is not None:
-        assert not is_managed and os.environ["GITHUB_REPOSITORY_ID"] == "1286130219"
-        waiter = old / "bin" / WAITER
-        assert digest(waiter) == digest(package / "bin" / WAITER)
-        assert digest(waiter) != digest(args.isolated_setup_waiter)
-        shutil.copy2(args.isolated_setup_waiter, waiter)
-        save(args.evidence / "waiter-trace-input.json",
-             {"nativeWaiterSha256": digest(package / "bin" / WAITER), "traceWaiterSha256": digest(waiter),
-              "setupSha256": digest(setup), "receiptTimeoutSeconds": 300})
     marker = root / ".gsw-github-preview/prepared.json"
     sentinel = root / "user-project-keep.gsw"
     sentinel.write_bytes(b"owned synthetic user data; never overwrite")
@@ -273,18 +263,14 @@ def main():
     parser = argparse.ArgumentParser()
     for name in ("root", "package", "setup", "fixture", "release_dir", "evidence"):
         parser.add_argument("--" + name.replace("_", "-"), dest=name, type=Path, required=True)
-    parser.add_argument("--isolated-setup-waiter", type=Path,
-                        help="Use a trace waiter only in a replay of the fixed e96102e hosted fixture")
     args = parser.parse_args()
     assert os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
     assert not args.root.exists() and args.root.resolve().drive.lower() == "d:"
     args.root.mkdir(parents=True)
     args.evidence.mkdir(parents=True, exist_ok=True)
-    suite = os.environ["GITHUB_SHA"]
-    assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == suite
-    traced = args.isolated_setup_waiter is not None
-    head = "e96102ef6d19b0c39384fb5dab530444dba3f5b8" if traced else suite
-    tree = subprocess.check_output(["git", "rev-parse", head + "^{tree}"], text=True).strip()
+    head = os.environ["GITHUB_SHA"]
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == head
     settings = r"Software\GaussianSceneWorkbench\Gaussian Scene Workbench\updates"
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\GaussianSceneWorkbench\Gaussian Scene Workbench\ui") as key:
         winreg.SetValueEx(key, "language", 0, winreg.REG_SZ, "en_US")
@@ -308,10 +294,8 @@ def main():
     rc, row = helper_call(prod / "bin" / HELPER, "--check", os.environ)
     assert rc == 0 and row["phase"] == "current", row
     result.update(realGithubReadback=row["code"], runId=os.environ["GITHUB_RUN_ID"], layouts=[])
-    if traced:
-        result.update(suiteCommit=suite, diagnosticOnly=True)
     save(args.evidence / "result.json", result)
-    for layout in (("fixed",) if traced else ("managed", "fixed")):
+    for layout in ("managed", "fixed"):
         result["layouts"].append(layout_run(layout, args, args.package, args.setup, feed, manifest, os.environ))
         save(args.evidence / "result.json", result)
     result["passed"] = True
