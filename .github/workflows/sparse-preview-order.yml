@@ -1,0 +1,61 @@
+name: Sparse preview order
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/backend/compute.py'
+      - 'native/worker/gsw_worker.py'
+  workflow_dispatch:
+    inputs:
+      witness:
+        description: Reproduce on the pinned old code instead of testing current main
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  worker-order:
+    name: Windows CPU sparse preview order
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        if: inputs.witness
+        with:
+          ref: e96102ef6d19b0c39384fb5dab530444dba3f5b8
+          path: baseline
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Exercise actual COLMAP records and native worker telemetry
+        shell: pwsh
+        env:
+          WITNESS: ${{ inputs.witness }}
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONUTF8: '1'
+          CUDA_VISIBLE_DEVICES: '-1'
+        run: |
+          if ($env:RUNNER_ENVIRONMENT -cne 'github-hosted') { throw 'Hosted Windows only.' }
+          $drive = if (Test-Path -LiteralPath 'D:/') { 'D:/' } else { $env:RUNNER_TEMP }
+          $root = Join-Path $drive ('gsw-order-' + $env:GITHUB_RUN_ID + '-' + $env:GITHUB_RUN_ATTEMPT)
+          if (Test-Path -LiteralPath $root) { throw 'Fixture root already exists.' }
+          New-Item -ItemType Directory -Path $root | Out-Null
+          $env:TEMP = $root
+          $env:TMP = $root
+          $env:GS_EDITOR_WORKSPACE_ROOT = Join-Path $root 'workspace'
+          python -m pip install --disable-pip-version-check --no-cache-dir numpy==2.2.6 plyfile==1.1.3
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if ($env:WITNESS -eq 'true') {
+            python -I -B .github/scripts/sparse_preview_order.py --source ./baseline --root $root --witness
+          } else {
+            python -I -B .github/scripts/sparse_preview_order.py --source . --root $root
+          }
+          exit $LASTEXITCODE
