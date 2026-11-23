@@ -73,6 +73,11 @@ jobs:
         run: |
           ./scripts/setup_native_ci_display.ps1
           ./scripts/setup_native_ci_graphics.ps1
+      - name: Cache public symbols for these Windows binaries on D
+        shell: pwsh
+        run: |
+          python -I -B native/github-preview-update/fetch_setup_trace_symbols.py
+          exit $LASTEXITCODE
       - name: Reproduce the original Setup handoff without handling any Windows prompts
         shell: pwsh
         run: |
@@ -85,7 +90,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: setup-receipt-diagnostic
-          path: D:/gsw-preview-qa/evidence/
-          if-no-files-found: warn
+          name: setup-receipt-stack-symbols
+          path: D:/gsw-preview-qa/evidence/shell-stack-*.txt
+          if-no-files-found: error
           retention-days: 30
