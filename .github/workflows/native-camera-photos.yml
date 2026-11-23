@@ -224,6 +224,10 @@ jobs:
             'PASS (scoped real Windows viewport, not full release acceptance)' |
               Set-Content -LiteralPath "$evidence/outcome.txt" -Encoding utf8
           }
+          # The raw CTest failure is intentional only after the witness checks
+          # above proved the expected old behavior and retained its RED receipt.
+          # Do not let the PowerShell runner propagate that child exit code.
+          exit 0
 
       - uses: actions/upload-artifact@v7
         if: always() && env.GSW_CAMERA_EVIDENCE != ''
