@@ -62,33 +62,44 @@ def check(helper_build, root):
                "assets": [asset(n) for n in (manifest_name, setup, manifest["archive"])]}
     put(feed / "releases.json", [release])
     code, row = run(helper, "--check", "preview", env=env)
-    assert code == 0 and row["phase"] == "available" and row["offer"]["buildId"] == manifest["offer"]["buildId"], row
-    code, row = run(helper, "--prepare", "preview", env=env)
-    assert code == 0 and row["phase"] == "prepared", row
+    assert code == 0 and row["phase"] == "available" and row["code"] == "GITHUB_PREVIEW_MANUAL", row
+    assert row["offer"]["buildId"] == manifest["offer"]["buildId"], row
+    # A classic installation can notify, but cannot cache/execute an installer.
+    for operation in (("--prepare", "preview"), ("--apply-prepared", "preview", manifest["offer"]["buildId"], "1")):
+        code, row = run(helper, *operation, env=env)
+        assert code != 0 and row["code"] == "preview_setup_manual_only", row
+        assert not (fixed / ".gsw-github-preview").exists()
     assert (fixed / "gsw-installation.ini").exists() and not (fixed / "current.json").exists()
-    (feed / setup).write_bytes(b"x" * len(payload))
-    # A new empty cache must reject corruption, even with the expected length.
-    other = root / "fresh fixed"
-    (other / "bin").mkdir(parents=True)
-    shutil.copy2(helper_build, other / "bin" / helper.name)
-    shutil.copy2(fixed / "gsw-installation.ini", other)
-    code, row = run(other / "bin" / helper.name, "--prepare", "preview", env=env)
-    assert code != 0 and row["phase"] == "failed", row
-    assert not (other / ".gsw-github-preview/prepared.json").exists()
+    # File corruption and trust checks still run on the managed ZIP route.
+    managed = root / "Managed path 日本語 中文"
+    active = managed / "versions/a"
+    (active / "bin").mkdir(parents=True)
+    managed_helper = active / "bin" / helper.name
+    shutil.copy2(helper_build, managed_helper)
+    put(managed / "current.json", {"schema": "gsw.native_active_version/1", "version": "a"})
+    put(managed / "bootstrap.json", {"schema": "gsw.native_bootstrap/1", "protocol": 1, "files": []})
+    (feed / manifest["archive"]).write_bytes(b"x" * 7)
+    code, row = run(managed_helper, "--prepare", "preview", env=env)
+    assert code != 0 and row["code"] == "preview_package_digest_mismatch", row
+    assert not (managed / ".gsw-github-preview/prepared.json").exists()
+    (feed / manifest["archive"]).write_bytes(b"managed")
+    code, row = run(managed_helper, "--prepare", "preview", env=env)
+    assert code == 0 and row["phase"] == "prepared", row
+    assert json.loads((managed / "current.json").read_text())["version"] == "a"
     release["assets"][1]["browser_download_url"] = "https://example.invalid/other.exe"
     put(feed / "releases.json", [release])
-    code, row = run(helper, "--prepare", "preview", env=env)
+    code, row = run(managed_helper, "--prepare", "preview", env=env)
     assert code != 0, row
     release["immutable"] = False
     put(feed / "releases.json", [release])
-    assert run(helper, "--prepare", "preview", env=env)[0] != 0
+    assert run(managed_helper, "--prepare", "preview", env=env)[0] != 0
     release["immutable"] = True
     release["tag_name"] = "v0.3.9-native-preview.20261119.1"
     put(feed / "releases.json", [release])
-    assert run(helper, "--check", "preview", env=env)[1]["phase"] == "current"
-    assert run(helper, "--prepare", "preview", env=env)[0] != 0
-    (fixed / ".update-trust-anchor").write_bytes(b"existing independent trust")
-    code, row = run(helper, "--check", "preview", env=env)
+    assert run(managed_helper, "--check", "preview", env=env)[1]["phase"] == "current"
+    assert run(managed_helper, "--prepare", "preview", env=env)[0] != 0
+    (managed / ".update-trust-anchor").write_bytes(b"existing independent trust")
+    code, row = run(managed_helper, "--check", "preview", env=env)
     assert code != 0 and row["code"] == "preview_trusted_root_forbidden", row
     assert run(helper, "--check", "stable", env=env)[0] != 0
 

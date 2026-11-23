@@ -41,6 +41,8 @@ jobs:
           $env:TEMP='D:/gsw-preview/test-temp'; $env:TMP=$env:TEMP
           New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
           python -I -B native/github-preview-update/test_github_preview.py D:/gsw-preview/build/Release/gsw_github_preview_fixture.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -I -B native/github-preview-update/test_starter_package.py
           exit $LASTEXITCODE
       - name: Exercise the shipped transport anonymously against the real public repository
         shell: pwsh

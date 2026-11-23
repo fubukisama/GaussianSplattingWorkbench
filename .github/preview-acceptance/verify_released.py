@@ -79,9 +79,13 @@ def main():
     assert setup["digest"] == "sha256:"+observed
     archive = asset(qa.ARCHIVE)
     assert archive["digest"] == "sha256:"+descriptor["offer"]["archiveSha256"]
+    starter_asset = asset(qa.STARTER)
+    starter = args.root / qa.STARTER
+    starter_sha = fetch(starter_asset["browser_download_url"], starter_asset["size"], starter)
+    assert starter_asset["digest"] == "sha256:"+starter_sha
     result = {"source": expected_sha, "tag": tag, "releaseId": api["id"], "immutable": True,
               "testServer": False, "authenticatedGithubRequests": False,
-              "baselineChange": "compile-time update sequence only", "layouts": []}
+              "baselineChange": "compile-time update sequence only", "starterSha256": starter_sha, "layouts": []}
     qa.save(args.evidence / "real-release.json", result)
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\GaussianSceneWorkbench\Gaussian Scene Workbench\ui") as key:
         winreg.SetValueEx(key, "language", 0, winreg.REG_SZ, "en_US")
@@ -97,7 +101,15 @@ def main():
         if managed:
             old, new = root / "versions/fixture-a", root / "versions" / descriptor["offer"]["buildId"]
             link, inspector = args.root / "Managed official entry.lnk", root / "bin" / qa.LAUNCHER
-            qa.seed_managed(root, args.payload, old, link)
+            qa.install_starter(starter, root, args.payload, new.name)
+            subprocess.run([str(inspector), "--write-shortcut", str(link)], check=True, timeout=30)
+            first_exe = new / "bin" / qa.APP
+            first = qa.launch(link, first_exe)
+            qa.close_and_wait_for_process(first, first_exe, 120)
+            new.rename(old)
+            pointer = qa.load(root / "current.json")
+            pointer["version"] = old.name
+            qa.save(root / "current.json", pointer)
         else:
             old = new = root
             group = "GSW Published Preview " + os.environ["GITHUB_RUN_ID"]
@@ -114,21 +126,31 @@ def main():
         proc = qa.launch(link, old_exe)
         cache = root / ".gsw-github-preview"
         marker = cache / "prepared.json"
+        if not managed:
+            rc, event = qa.helper_call(old_helper, "--check", os.environ)
+            assert rc == 0 and event["code"] == "GITHUB_PREVIEW_MANUAL", event
+            rc, event = qa.helper_call(old_helper, "--prepare", os.environ)
+            assert rc != 0 and event["code"] == "preview_setup_manual_only", event
+            qa.close_and_wait_for_process(proc, old_exe, 120)
+            assert not cache.exists() and qa.digest(old_helper) == qa.digest(args.baseline)
+            assert qa.link_info(inspector, link) == target and good.read_bytes() == b"public-readback-preserved-data"
+            result["layouts"].append({"layout": "fixed", "source": "real-github",
+                                      "manualSetup": True, "noAutomaticSetup": True,
+                                      "sameEntry": True, "userDataPreserved": True,
+                                      "assetSha256": observed, "exeSha256": qa.digest(old_exe)})
+            qa.save(args.evidence / "real-release.json", result)
+            continue
         qa.wait(lambda: marker.is_file(), 300, "real public download and verification")
         receipt = qa.load(marker)
-        expected_bytes = descriptor["offer"]["archiveSha256"] if managed else observed
+        expected_bytes = descriptor["offer"]["archiveSha256"]
         assert receipt["buildId"] == descriptor["offer"]["buildId"] and receipt["sha256"] == expected_bytes
-        assert qa.digest(cache / (expected_bytes + (".zip" if managed else ".exe"))) == expected_bytes
+        assert qa.digest(cache / (expected_bytes + ".zip")) == expected_bytes
         qa.close(proc, old_exe, accept=False)
         assert qa.main_window(old_exe)[1] == proc[1] and qa.digest(old_helper) == qa.digest(args.baseline)
         qa.close(proc, old_exe)
         qa.wait(lambda: not any(w[1]==proc[1] for w in qa.windows(old_exe)),120,"accepted close")
-        if managed:
-            qa.wait(lambda: qa.load(root / "current.json")["version"] == receipt["buildId"], 120, "public managed activation")
-            assert qa.load(root / "updates/receipts" / (receipt["buildId"]+".json"))["mode"] == "github-preview"
-        else:
-            done = cache / ("setup-result-" + observed + ".json")
-            assert qa.wait(lambda: qa.load(done) if done.exists() else None, 300, "public Setup handoff")["exitCode"] == 0
+        qa.wait(lambda: qa.load(root / "current.json")["version"] == receipt["buildId"], 120, "public managed activation")
+        assert qa.load(root / "updates/receipts" / (receipt["buildId"]+".json"))["mode"] == "github-preview"
         assert qa.digest(new_exe) == installed_image and qa.digest(new / "bin" / qa.HELPER) == winner
         assert qa.link_info(inspector, link) == target and good.read_bytes() == b"public-readback-preserved-data"
         proc_b = qa.launch(link, new_exe)
@@ -137,6 +159,7 @@ def main():
         qa.wait(lambda: not any(w[1]==proc_b[1] for w in qa.windows(new_exe)), 120, "new app normal exit")
         result["layouts"].append({"layout":label,"oldPid":proc[1],"newPid":proc_b[1],"source":"real-github",
                                   "sameEntry":True,"userDataPreserved":True,"cancelledExitKeptA":True,
+                                  "starterFirstLaunch":True,"previousSlotRetained":old_exe.is_file(),
                                   "assetSha256":expected_bytes,"exeSha256":installed_image,"helperSha256":winner})
         qa.save(args.evidence / "real-release.json", result)
     result["passed"] = True

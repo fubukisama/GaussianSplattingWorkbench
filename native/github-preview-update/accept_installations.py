@@ -17,10 +17,11 @@ import subprocess
 import sys
 import time
 import winreg
+import zipfile
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1] / "scripts"))
-from prepare_github_preview_release import build
+from prepare_github_preview_release import STARTER, build, validate_relative_path
 
 APP = "Gaussian Scene Workbench.exe"
 LAUNCHER = "Gaussian Scene Workbench Launcher.exe"
@@ -33,6 +34,8 @@ ENUM = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
 K.OpenProcess.argtypes = [w.DWORD, w.BOOL, w.DWORD]
 K.OpenProcess.restype = w.HANDLE
 K.CloseHandle.argtypes = [w.HANDLE]
+K.WaitForSingleObject.argtypes = [w.HANDLE, w.DWORD]
+K.WaitForSingleObject.restype = w.DWORD
 K.QueryFullProcessImageNameW.argtypes = [w.HANDLE, w.DWORD, w.LPWSTR, ctypes.POINTER(w.DWORD)]
 U.GetWindowThreadProcessId.argtypes = [w.HWND, ctypes.POINTER(w.DWORD)]
 U.IsWindowVisible.argtypes = [w.HWND]
@@ -172,18 +175,44 @@ def corrupt_case(layout, helper, payload, env, initial, marker):
             f.write(original)
 
 
-def seed_managed(install, package, slot, link):
-    bindir = install / "bin"
-    bindir.mkdir(parents=True)
-    for dll in (package / "bin").glob("*.dll"):
-        shutil.copy2(dll, bindir / dll.name)
-    shutil.copy2(package / "bin" / LAUNCHER, bindir / LAUNCHER)
-    rows = [{"path": "bin/" + f.name, "size": f.stat().st_size, "sha256": digest(f)} for f in sorted(bindir.iterdir())]
-    save(install / "bootstrap.json", {"schema": "gsw.native_bootstrap/1", "protocol": 1, "files": rows})
-    shutil.copytree(package, slot)
-    save(install / "current.json", {"schema": "gsw.native_active_version/1", "version": slot.name,
-                                    "executableSha256": digest(slot / "bin" / APP)})
-    subprocess.run([str(bindir / LAUNCHER), "--write-shortcut", str(link)], check=True, timeout=30)
+def install_starter(archive, root, package, version):
+    assert not any(root.iterdir()) and "/" not in validate_relative_path(version)
+    files = {f.relative_to(package).as_posix(): f for f in package.rglob("*") if f.is_file()}
+    boot_files = {name: f for name, f in files.items() if name.startswith("bin/") and name != "bin/" + APP}
+    copies = {f"versions/{version}/{name}": f for name, f in files.items()}
+    copies.update(boot_files)
+    with zipfile.ZipFile(archive) as starter:
+        expected = set(copies) | {"bootstrap.json", "current.json", "START-HERE.txt"}
+        assert len(starter.infolist()) == len(expected) and set(starter.namelist()) == expected
+        for name in sorted(expected):
+            validate_relative_path(name)
+            output = root / name
+            output.parent.mkdir(parents=True, exist_ok=True)
+            with starter.open(name) as src, output.open("xb") as dst:
+                shutil.copyfileobj(src, dst, 1024**2)
+            if name in copies:
+                assert digest(output) == digest(copies[name]), name
+    bootstrap = load(root / "bootstrap.json")
+    assert bootstrap == {"schema": "gsw.native_bootstrap/1", "protocol": 1,
+                         "files": [{"path": n, "size": f.stat().st_size, "sha256": digest(f)}
+                                   for n, f in sorted(boot_files.items())]}, bootstrap
+    assert load(root / "current.json") == {"schema": "gsw.native_active_version/1", "version": version,
+                                          "executableSha256": digest(package / "bin" / APP)}
+
+
+def classic_setup(setup, root, group):
+    subprocess.run([str(setup), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER",
+                    "/DIR=" + str(root), "/GROUP=" + group], check=True, timeout=180)
+
+
+def close_and_wait_for_process(window, exe, seconds):
+    process = K.OpenProcess(0x00100000, False, window[1])  # SYNCHRONIZE
+    assert process, "unable to observe the owned application process"
+    try:
+        close(window, exe)
+        assert K.WaitForSingleObject(process, seconds * 1000) == 0, "owned application did not exit"
+    finally:
+        K.CloseHandle(process)
 
 
 def layout_run(mode, args, package, setup, feed, manifest, env):
@@ -196,13 +225,22 @@ def layout_run(mode, args, package, setup, feed, manifest, env):
         old = root / "versions/fixture-a"
         new = root / "versions" / expected_id
         link = args.root / "Original managed entry.lnk"
-        seed_managed(root, package, old, link)
+        install_starter(args.release_dir / STARTER, root, package, expected_id)
         inspector = root / "bin" / LAUNCHER
+        subprocess.run([str(inspector), "--write-shortcut", str(link)], check=True, timeout=30)
+        initial_exe = new / "bin" / APP
+        first = launch(link, initial_exe)
+        close_and_wait_for_process(first, initial_exe, 140)
+        # Freeze an older controlled A using the same app bytes, not the
+        # actual untouched starter/archive distributed as candidate B.
+        new.rename(old)
+        pointer = load(root / "current.json")
+        pointer["version"] = old.name
+        save(root / "current.json", pointer)
     else:
         old = new = root
         group = "GSW GitHub Preview QA " + os.environ["GITHUB_RUN_ID"]
-        subprocess.run([str(setup), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER",
-                        "/DIR=" + str(root), "/GROUP=" + group], check=True, timeout=180)
+        classic_setup(setup, root, group)
         link = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs" / group / "Gaussian Splatting Workbench.lnk"
         inspector = package / "bin" / LAUNCHER
         assert link.is_file() and (root / "gsw-installation.ini").is_file(), link
@@ -223,7 +261,34 @@ def layout_run(mode, args, package, setup, feed, manifest, env):
     def before():
         return (digest(helper) == seed_hash and digest(sentinel) == sentinel_hash and
                 (not is_managed or (root / "current.json").read_bytes() == original_pointer))
-    bad = corrupt_case(mode, helper, feed / (ARCHIVE if is_managed else setup.name), env, before, marker)
+    if not is_managed:
+        rc, row = helper_call(helper, "--check", env)
+        assert rc == 0 and row["code"] == "GITHUB_PREVIEW_MANUAL" and row["offer"]["buildId"] == expected_id, row
+        rc, row = helper_call(helper, "--prepare", env)
+        assert rc != 0 and row["code"] == "preview_setup_manual_only" and not marker.parent.exists(), row
+        # The classic app can have a marker left by the old implementation.
+        # Closing with that stale marker must not initiate a Setup handoff.
+        marker.parent.mkdir()
+        save(marker, {"schema": "gsw.github_preview_prepared/1", "channel": "preview", "buildId": expected_id,
+                      "descriptorSha256": digest(feed / MANIFEST), "sha256": digest(setup)})
+        old_marker = digest(marker)
+        a = launch(link, exe_a)
+        close_and_wait_for_process(a, exe_a, 140)
+        assert before() and list(marker.parent.iterdir()) == [marker] and digest(marker) == old_marker
+        # Manual setup remains supported. This is a tester-initiated install
+        # of its local CI-built artifact, not an updater launch or policy override.
+        classic_setup(setup, root, group)
+        assert not (root / "current.json").exists()
+        for file_row in load(root / "installer-payload.json")["files"]:
+            assert digest(root / file_row["path"]) == file_row["sha256"], file_row["path"]
+        assert digest(exe_b) == digest(package / "bin" / APP) and digest(helper) == production_hash
+        assert digest(sentinel) == sentinel_hash and info_before == link_info(inspector, link)
+        b = launch(link, exe_b)
+        close(b, exe_b)
+        wait(lambda: not any(r[1] == b[1] for r in windows(exe_b)), 100, "manual Setup reopen exit")
+        return {"layout": "fixed", "manualSetup": True, "noAutomaticSetup": True, "checkedUpdate": "GITHUB_PREVIEW_MANUAL",
+                "sameOriginalEntry": True, "userDataUnchanged": True, "installedExecutableSha256": digest(exe_b)}
+    bad = corrupt_case(mode, helper, feed / ARCHIVE, env, before, marker)
     a = launch(link, exe_a)
     assert wait(lambda: marker.is_file(), 190, "published-byte preparation while A remains open")
     assert load(marker)["buildId"] == expected_id and before() and main_window(exe_a)[1] == a[1]
@@ -231,21 +296,10 @@ def layout_run(mode, args, package, setup, feed, manifest, env):
     assert before() and main_window(exe_a)[1] == a[1] and marker.is_file()
     close(a, exe_a)
     wait(lambda: not any(r[1] == a[1] for r in windows(exe_a)), 140, "normal A exit")
-    if is_managed:
-        wait(lambda: load(root / "current.json")["version"] == expected_id, 120, "atomic B pointer")
-        receipt = load(root / "updates/receipts" / (expected_id + ".json"))
-        assert receipt["mode"] == "github-preview" and digest(helper) == seed_hash
-        assert not (root / ".update-trust-anchor").exists()
-    else:
-        completed = marker.parent / ("setup-result-" + digest(setup) + ".json")
-        status = wait(lambda: load(completed) if completed.is_file() else None, 300, "OS installer completion receipt")
-        assert status["exitCode"] == 0, status
-        wait(lambda: (new / "gsw-preview-sequence.txt").is_file() and
-             (new / "gsw-preview-sequence.txt").read_text().strip() == str(seq) and
-             digest(new / "bin" / HELPER) == production_hash, 240, "real Setup B installed on exit")
-        assert not (root / "current.json").exists()
-        for row in load(root / "installer-payload.json")["files"]:
-            assert digest(root / row["path"]) == row["sha256"], row["path"]
+    wait(lambda: load(root / "current.json")["version"] == expected_id, 120, "atomic B pointer")
+    receipt = load(root / "updates/receipts" / (expected_id + ".json"))
+    assert receipt["mode"] == "github-preview" and digest(helper) == seed_hash and exe_a.is_file()
+    assert not (root / ".update-trust-anchor").exists()
     assert digest(new / "bin" / HELPER) == production_hash and digest(exe_b) == digest(package / "bin" / APP)
     assert digest(sentinel) == sentinel_hash and info_before == link_info(inspector, link)
     b = launch(link, exe_b)
@@ -256,6 +310,7 @@ def layout_run(mode, args, package, setup, feed, manifest, env):
             "sourceB": "unmodified Native Windows package", "oldPid": a[1], "newPid": b[1],
             "oldHelperSha256": seed_hash, "newHelperSha256": production_hash, "installedExecutableSha256": digest(exe_b),
             "activeBuild": expected_id, "sameOriginalEntry": True, "cancelledExitKeptA": True,
+            "starterFirstLaunch": True, "previousSlotRetained": True,
             "corruptRefusal": bad, "userDataUnchanged": True}
 
 

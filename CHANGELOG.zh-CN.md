@@ -19,6 +19,8 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 
 ## 2026-11-23
 
+- **Windows 托管预览：**新增独立启动包，首次在空目录中从固定启动器启动；开启自动下载后，正常退出时应用已校验的新版。经典向导版只检查预览更新，仍从官方发布页手动运行 Setup，不会在退出时自动启动下载来的安装程序。正式签名通道不变。[更新说明](docs/NATIVE_UPDATES.md#github-preview)
+
 - **修复：** 独立 COLMAP 重建及 3DGS／2DGS 的稀疏准备阶段中，迟到的旧快照不再替换较新的点云预览。新快照允许正常减少点数，验收后的最终点云优先显示。不改变重建和训练输出。
   [修复源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/4d5d8196160bdd7c54b0efdd0f7678e25c8e306e)
 

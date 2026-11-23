@@ -22,6 +22,8 @@ separate claims.
 
 ## 2026-11-23
 
+- **Managed Windows preview:** A separate starter ZIP provides a stable launcher and versioned updates. A verified update is applied on normal exit after automatic download is enabled. Classic Setup now checks for updates but is run manually from the official release page, avoiding unattended launch of a downloaded installer. The signed stable route is unchanged. [Update guide](docs/NATIVE_UPDATES.md#github-preview)
+
 - **Fixed:** A delayed older COLMAP snapshot no longer replaces a newer sparse preview during standalone reconstruction or 3DGS and 2DGS preparation. Newer observations may still contain fewer points, and the validated final point cloud takes precedence. Reconstruction and training outputs are unchanged.
   [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/4d5d8196160bdd7c54b0efdd0f7678e25c8e306e)
 

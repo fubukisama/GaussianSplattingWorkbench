@@ -8,6 +8,7 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -26,6 +27,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QTimer>
+#include <QUrl>
 #include <QVBoxLayout>
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -71,7 +73,7 @@ public:
         if (item.exists() || item.isSymLink()) mPreviewSupported = false;
       }
     }
-    mPrepared = !mRoot.isEmpty() && QFileInfo(preparedMarker()).isFile();
+    mPrepared = !mFixedSetup && !mRoot.isEmpty() && QFileInfo(preparedMarker()).isFile();
     AppLanguage::onChanged(this, [this] { refresh(); });
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this,
         [this] { installOnAcceptedExit(); });
@@ -107,11 +109,11 @@ private:
     return QDir(mRoot).filePath(githubPreview() ? QStringLiteral(".gsw-github-preview/prepared.json") : QStringLiteral("updates/prepared.json"));
   }
   bool automaticPreparationEnabled() const {
-    return QSettings().value(QStringLiteral("updates/automaticCheck"), true).toBool() &&
+    return !mFixedSetup && QSettings().value(QStringLiteral("updates/automaticCheck"), true).toBool() &&
         QSettings().value(QStringLiteral("updates/prepareForNextLaunch"), false).toBool();
   }
   void installOnAcceptedExit() {
-    if (!mCloseAccepted || mProcess || mRoot.isEmpty() || !mPrepared ||
+    if (mFixedSetup || !mCloseAccepted || mProcess || mRoot.isEmpty() || !mPrepared ||
         !(automaticPreparationEnabled() || (githubPreview() && mManualQueued))) return;
     if (QDateTime::currentDateTimeUtc() < QSettings().value(QStringLiteral("updates/deferredUntil")).toDateTime()) return;
     // The on-disk marker is an intent, not trust evidence. Pass the exact
@@ -154,6 +156,9 @@ private:
     if (mRoot.isEmpty()) { mCode = QStringLiteral("BOOTSTRAP_REQUIRED"); mPhase = QStringLiteral("failed"); refresh(); return; }
     const bool fromGithub = githubPreview();
     if (mFixedSetup && !fromGithub) { mCode = QStringLiteral("NOT_CONFIGURED"); mPhase = QStringLiteral("failed"); refresh(); return; }
+    if (mFixedSetup && operation != QLatin1String("--check")) {
+      mCode = QStringLiteral("preview_setup_manual_only"); mPhase = QStringLiteral("failed"); refresh(); return;
+    }
     const auto helper = fromGithub ? mPreviewHelper : QDir(mRoot).filePath(QString::fromLatin1("bin/Gaussian Scene Workbench Update Helper.exe"));
     if (!QFileInfo(helper).isFile()) { mCode = QStringLiteral("BOOTSTRAP_REQUIRED"); mPhase = QStringLiteral("failed"); refresh(); return; }
     if (operation == QLatin1String("--check")) QSettings().setValue(QStringLiteral("updates/lastAttempt"), QDateTime::currentDateTimeUtc());
@@ -178,7 +183,7 @@ private:
         if (mPhase == QLatin1String("available")) mOffer = event.value(QStringLiteral("offer")).toObject();
         if (mPhase == QLatin1String("prepared")) mPrepared = true;
         if (mPhase == QLatin1String("current")) { mOffer = {}; mPrepared = false; }
-        if (mPhase == QLatin1String("activated") || mPhase == QLatin1String("scheduled")) mPrepared = false;
+        if (mPhase == QLatin1String("activated")) mPrepared = false;
         if (event.contains(QStringLiteral("receivedBytes"))) {
           mReceived = event.value(QStringLiteral("receivedBytes")).toDouble();
           mTotal = event.value(QStringLiteral("totalBytes")).toDouble();
@@ -198,8 +203,7 @@ private:
       const auto expectedPhase = operation == QLatin1String("--check") ? QStringLiteral("available")
           : operation == QLatin1String("--prepare") ? QStringLiteral("prepared") : QStringLiteral("activated");
       const bool previewFinal = fromGithub &&
-          ((operation == QLatin1String("--check") && mPhase == QLatin1String("current")) ||
-           (operation == QLatin1String("--apply-prepared") && mPhase == QLatin1String("scheduled")));
+          operation == QLatin1String("--check") && mPhase == QLatin1String("current");
       if (exit == QProcess::NormalExit && code == 0 && !previewFinal &&
           (!mBuffer.trimmed().isEmpty() || mPhase != expectedPhase ||
            (operation == QLatin1String("--check") && mOffer.value(QStringLiteral("buildId")).toString().isEmpty()))) {
@@ -241,6 +245,9 @@ private:
     mStatus->setTextFormat(Qt::PlainText); mStatus->setWordWrap(true); layout->addWidget(mStatus);
     mOrigin = AppLanguage::text(new QLabel(dialog), AppLanguage::source("来源：项目官方 GitHub Releases。预览安装包可能没有 Windows 发布者签名。"));
     mOrigin->setWordWrap(true); mOrigin->setTextFormat(Qt::PlainText); layout->addWidget(mOrigin);
+    mManual = AppLanguage::text(new QLabel(dialog), AppLanguage::source("向导安装版只检查预览更新。请从官方发布页下载并手动运行安装程序；如需退出时自动更新，请使用托管预览启动包。"));
+    mManual->setWordWrap(true); mManual->setTextFormat(Qt::PlainText);
+    mManual->setObjectName(QStringLiteral("nativeUpdateManualSetup")); layout->addWidget(mManual);
     mProgress = new QProgressBar(dialog); mProgress->setRange(0, 1000); layout->addWidget(mProgress);
     mNotes = new QPlainTextEdit(dialog); mNotes->setObjectName(QStringLiteral("nativeUpdateNotes")); mNotes->setReadOnly(true); layout->addWidget(mNotes);
     auto *form = new QFormLayout;
@@ -254,13 +261,14 @@ private:
     layout->addLayout(form);
     connect(mChannel, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
       QSettings().setValue(QStringLiteral("updates/channel"), mChannel->currentData()); mOffer = {}; mManualQueued = false;
-      mPrepared = !mRoot.isEmpty() && QFileInfo(preparedMarker()).isFile(); refresh();
+      mPrepared = !mFixedSetup && !mRoot.isEmpty() && QFileInfo(preparedMarker()).isFile(); refresh();
     });
     auto *check = AppLanguage::text(new QCheckBox(dialog), AppLanguage::source("后台自动检查（不弹出窗口）"));
     check->setChecked(QSettings().value(QStringLiteral("updates/automaticCheck"), true).toBool());
     connect(check, &QCheckBox::toggled, this, [this](bool value) { QSettings().setValue(QStringLiteral("updates/automaticCheck"), value); refresh(); }); layout->addWidget(check);
     auto *prepare = AppLanguage::text(new QCheckBox(dialog), AppLanguage::source("自动下载并在正常退出时安装"));
     prepare->setChecked(QSettings().value(QStringLiteral("updates/prepareForNextLaunch"), false).toBool());
+    prepare->setVisible(!mFixedSetup);
     connect(prepare, &QCheckBox::toggled, this, [this](bool value) { QSettings().setValue(QStringLiteral("updates/prepareForNextLaunch"), value); refresh(); }); layout->addWidget(prepare);
     auto *buttons = new QGridLayout; layout->addLayout(buttons);
     int buttonIndex = 0;
@@ -270,6 +278,13 @@ private:
     mApply = button(AppLanguage::source("下次启动使用此版本")); connect(mApply, &QPushButton::clicked, this, [this] {
       if (githubPreview()) { mManualQueued = true; mPhase = QStringLiteral("preview_queued"); refresh(); }
       else begin(QStringLiteral("--apply-prepared"));
+    });
+    mDownload->setVisible(!mFixedSetup);
+    mApply->setVisible(!mFixedSetup);
+    mReleasePage = button(AppLanguage::source("打开官方发布页"));
+    mReleasePage->setObjectName(QStringLiteral("nativeUpdateManualReleasePage"));
+    connect(mReleasePage, &QPushButton::clicked, this, [] {
+      QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/fubukisama/GaussianSplattingWorkbench/releases")));
     });
     mCancel = button(AppLanguage::source("取消下载")); connect(mCancel, &QPushButton::clicked, this, [this] { if (mProcess) { mProcess->write("cancel\n"); mPhase = QStringLiteral("cancelling"); refresh(); } });
     mRetry = button(AppLanguage::source("重试")); connect(mRetry, &QPushButton::clicked, this, [this] { begin(mLastOperation.isEmpty() ? QStringLiteral("--check") : mLastOperation); });
@@ -292,6 +307,8 @@ private:
   void refresh() {
     if (!mDialog) return;
     mOrigin->setVisible(githubPreview());
+    mManual->setVisible(mFixedSetup && githubPreview());
+    mReleasePage->setVisible(mFixedSetup && githubPreview());
     mRunning->setText(text(AppLanguage::source("正在运行的构建：%1")).arg(mRoot.isEmpty() ? text(AppLanguage::source("开发构建（未托管安装）")) : mRunningBuild));
     QString status;
     if (mPhase == QLatin1String("preview_queued")) status = text(AppLanguage::source("已安排在正常退出时安装 GitHub 预览版。"));
@@ -331,11 +348,12 @@ private:
   QPointer<QDialog> mDialog;
   QPointer<QProcess> mProcess;
   QLabel *mRunning = nullptr, *mStatus = nullptr;
-  QLabel *mOrigin = nullptr;
+  QLabel *mOrigin = nullptr, *mManual = nullptr;
   QPlainTextEdit *mNotes = nullptr;
   QComboBox *mChannel = nullptr;
   QProgressBar *mProgress = nullptr;
   QPushButton *mCheck = nullptr, *mDownload = nullptr, *mApply = nullptr, *mCancel = nullptr, *mRetry = nullptr, *mSkip = nullptr;
+  QPushButton *mReleasePage = nullptr;
   QString mRoot, mRunningBuild, mRequestChannel, mLastOperation, mPhase, mCode;
   QByteArray mBuffer;
   QJsonObject mOffer;

@@ -7,10 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
-#include <atomic>
 #include <cstdio>
-#include <shlobj.h>
-#include <shellapi.h>
 
 namespace gsw {
 using namespace activation;
@@ -64,70 +61,6 @@ bool cancelled() {
   DWORD pending = 0;
   return PeekNamedPipe(input, nullptr, 0, nullptr, &pending, nullptr) && pending != 0;
 }
-void markInternetDownload(const QString &file, const QString &source) {
-  const HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-  if (FAILED(init) && init != RPC_E_CHANGED_MODE) fail("preview_windows_policy_blocked");
-  IAttachmentExecute *attachment = nullptr;
-  HRESULT result = CoCreateInstance(CLSID_AttachmentServices, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&attachment));
-  if (SUCCEEDED(result)) {
-    const auto local = QDir::toNativeSeparators(file).toStdWString(), origin = source.toStdWString();
-    result = attachment->SetLocalPath(local.c_str());
-    if (SUCCEEDED(result)) result = attachment->SetSource(origin.c_str());
-    if (SUCCEEDED(result)) result = attachment->Save();
-    attachment->Release();
-  }
-  if (SUCCEEDED(init)) CoUninitialize();
-  if (FAILED(result)) fail("preview_windows_policy_blocked");
-}
-void scheduleSetup(const Layout &layout, const preview::Asset &asset, const QString &path, DWORD waitingPid) {
-  if (!waitingPid) fail("preview_exit_identity_required");
-  QSettings registered(QString::fromLatin1("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Fubukisama.GaussianSceneWorkbench.Native_is1"),
-                       QSettings::Registry64Format);
-  const auto registeredRoot = QDir::cleanPath(QDir::fromNativeSeparators(registered.value(QStringLiteral("InstallLocation")).toString()));
-  if (registeredRoot.compare(QDir::cleanPath(layout.root), Qt::CaseInsensitive)) fail("preview_setup_registration_mismatch");
-  const auto installed = parse(read(QDir(layout.root).filePath(QStringLiteral("installer-payload.json"))));
-  QFile oldApp; heldRead(oldApp, QDir(layout.root).filePath(QString::fromLatin1("bin/Gaussian Scene Workbench.exe")));
-  if (installed.at("schema") != "gsw-installer-payload-v1" || string(installed.at("executableSha256")) != hash(oldApp))
-    fail("preview_setup_identity_mismatch");
-  markInternetDownload(path, asset.url);
-  QFile held; heldRead(held, path);
-  if (held.size() != asset.size || hash(held) != asset.sha256) fail("preview_package_digest_mismatch");
-  const auto image = read(QDir(QCoreApplication::applicationDirPath()).filePath(QString::fromLatin1("GSW Preview Setup Waiter.exe")), 4 * 1024 * 1024);
-  const auto waiterName = QFileInfo(path).dir().filePath(QStringLiteral("apply-") + digest(image) + QStringLiteral(".exe"));
-  if (!existsOrUnsafe(waiterName)) durableWrite(waiterName, image, false);
-  QFile waiter; heldRead(waiter, waiterName);
-  if (hash(waiter) != digest(image)) fail("preview_waiter_invalid");
-  struct Handle { HANDLE h{}; ~Handle(){ if(h) CloseHandle(h); } };
-  Handle file, app{OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, TRUE, waitingPid)};
-  if (!app.h && GetLastError() != ERROR_INVALID_PARAMETER) fail("preview_exit_identity_required");
-  if (app.h) {
-    wchar_t buf[32768]{}; DWORD n = 32768;
-    if (!QueryFullProcessImageNameW(app.h, 0, buf, &n) ||
-        QDir::fromNativeSeparators(QString::fromWCharArray(buf,int(n))).compare(
-            QDir(layout.root).filePath(QString::fromLatin1("bin/Gaussian Scene Workbench.exe")), Qt::CaseInsensitive))
-      fail("preview_exit_identity_required");
-  }
-  Handle helper{OpenProcess(SYNCHRONIZE, TRUE, GetCurrentProcessId())};
-  if (!helper.h || !DuplicateHandle(GetCurrentProcess(), reinterpret_cast<HANDLE>(_get_osfhandle(held.handle())),
-      GetCurrentProcess(), &file.h, 0, TRUE, DUPLICATE_SAME_ACCESS)) fail("preview_setup_not_started");
-  HANDLE inherited[3]{file.h, helper.h, app.h};
-  SIZE_T count = 0; InitializeProcThreadAttributeList(nullptr, 1, 0, &count);
-  std::vector<unsigned char> storage(count);
-  auto attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
-  if (!InitializeProcThreadAttributeList(attrs, 1, 0, &count)) fail("preview_setup_not_started");
-  struct Attributes { LPPROC_THREAD_ATTRIBUTE_LIST p; ~Attributes(){DeleteProcThreadAttributeList(p);} } owner{attrs};
-  if (!UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
-      (app.h ? 3 : 2) * sizeof(HANDLE), nullptr, nullptr)) fail("preview_setup_not_started");
-  const auto program = QDir::toNativeSeparators(waiterName).toStdWString();
-  auto command = QStringLiteral("\"%1\" --handoff %2 %3 %4").arg(QString::fromStdWString(program))
-      .arg(qulonglong(quintptr(file.h))).arg(qulonglong(quintptr(app.h))).arg(qulonglong(quintptr(helper.h))).toStdWString();
-  STARTUPINFOEXW si{}; si.StartupInfo.cb = sizeof(si); si.lpAttributeList = attrs;
-  PROCESS_INFORMATION pi{}; wchar_t system[32768]{};
-  if (!GetSystemDirectoryW(system, 32768) || !CreateProcessW(program.c_str(), command.data(), nullptr, nullptr, TRUE,
-      CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, nullptr, system, &si.StartupInfo, &pi))
-    fail("preview_setup_not_started");
-  CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
-}
 }
 
 class NativeGithubPreview {
@@ -139,6 +72,7 @@ public:
     if (!check && !prepare && op != QLatin1String("--apply-prepared")) fail("preview_arguments_invalid");
     if ((check || prepare) && args.size() != 3) fail("preview_arguments_invalid");
     const Layout layout = locate();
+    if (!layout.managed && !check) fail("preview_setup_manual_only");
     QDir root(layout.root);
     const auto cache = root.filePath(QStringLiteral(".gsw-github-preview"));
     const auto marker = QDir(cache).filePath(QStringLiteral("prepared.json"));
@@ -163,12 +97,16 @@ public:
     }
     const QJsonObject offer{{QStringLiteral("buildId"), release.build}, {QStringLiteral("displayVersion"), release.display},
       {QStringLiteral("channel"), QStringLiteral("preview")}, {QStringLiteral("archiveLength"), layout.managed ? release.archive.size : release.setup.size}};
-    if (check) { emitEvent(QStringLiteral("available"), QStringLiteral("GITHUB_PREVIEW"), {{QStringLiteral("offer"),offer}}); return 0; }
+    if (check) {
+      emitEvent(QStringLiteral("available"), layout.managed ? QStringLiteral("GITHUB_PREVIEW") : QStringLiteral("GITHUB_PREVIEW_MANUAL"),
+                {{QStringLiteral("offer"),offer}});
+      return 0;
+    }
     ensureDirectory(cache);
     NativeInstallationLock cacheLock(cache);
     if (!cacheLock.locked()) fail("preview_busy");
-    const auto &asset = layout.managed ? release.archive : release.setup;
-    const auto file = QDir(cache).filePath(asset.sha256 + (layout.managed ? QStringLiteral(".zip") : QStringLiteral(".exe")));
+    const auto &asset = release.archive;
+    const auto file = QDir(cache).filePath(asset.sha256 + QStringLiteral(".zip"));
     const Json expected{{"schema","gsw.github_preview_prepared/1"},{"channel","preview"},{"buildId",release.build.toStdString()},
       {"descriptorSha256",release.manifestHash.toStdString()},{"sha256",asset.sha256.toStdString()}};
     if (prepare) {
@@ -189,22 +127,15 @@ public:
       fail("preview_prepared_identity_changed");
     NativeInstallationLock activationLock(layout.root);
     if (!activationLock.locked()) fail("preview_busy");
-    locate(); // The active slot or root type may have changed since the request.
-    if (layout.managed) {
-      requireUnanchoredBootstrap(layout.root);
-      const auto result = NativeActivationCore::publish(layout.root, file, release.offer, activationLock,
-          NativeActivationCore::Admission::GithubPreview, release.manifestHash);
-      if (!result.ok) throw Failure{result.code};
-    } else {
-      bool ok = false; const auto pid = args[4].toUInt(&ok);
-      if (!ok) fail("preview_exit_identity_required");
-      scheduleSetup(layout, asset, file, pid);
-    }
-    // Fixed-layout installation is not complete until the external installer
-    // succeeds after exit. Do not report a scheduled installer as an activation.
-    if (layout.managed) QFile::remove(marker);
-    emitEvent(layout.managed ? QStringLiteral("activated") : QStringLiteral("scheduled"),
-              layout.managed ? QStringLiteral("NEXT_LAUNCH") : QStringLiteral("SETUP_SCHEDULED"));
+    const auto active = locate();
+    if (!active.managed || active.root != layout.root || active.slot != layout.slot)
+      fail("preview_inactive_version");
+    requireUnanchoredBootstrap(layout.root);
+    const auto result = NativeActivationCore::publish(layout.root, file, release.offer, activationLock,
+        NativeActivationCore::Admission::GithubPreview, release.manifestHash);
+    if (!result.ok) throw Failure{result.code};
+    QFile::remove(marker);
+    emitEvent(QStringLiteral("activated"), QStringLiteral("NEXT_LAUNCH"));
     return 0;
   }
 };
