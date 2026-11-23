@@ -114,6 +114,8 @@ jobs:
           "GSW_CAMERA_EVIDENCE=$qa/evidence" >> $env:GITHUB_ENV
           "GSW_RECONSTRUCTION_REVIEW_ROOT=$qa/fixtures" >> $env:GITHUB_ENV
           "GSW_SMOKE_OUTPUT_DIR=$qa/evidence/screenshots" >> $env:GITHUB_ENV
+          "GSW_BACKEND_ROOT=$env:GITHUB_WORKSPACE" >> $env:GITHUB_ENV
+          "GS_EDITOR_WORKSPACE_ROOT=$qa/workspaces" >> $env:GITHUB_ENV
           "TEMP=$qa/temp" >> $env:GITHUB_ENV
           "TMP=$qa/temp" >> $env:GITHUB_ENV
           [ordered]@{ sourceCommit=$head; sourceTree=$tree; parent=$parent;
@@ -164,6 +166,7 @@ jobs:
           cmake -S native -B "$build" -G 'Visual Studio 17 2022' -A x64 `
             -DBUILD_TESTING=ON -DGSW_ENABLE_RENDER_DIAGNOSTICS_CAPTURE_TEST=ON -DGSW_TEST_OPENGL_BACKEND=software `
             "-DGSW_RELEASE_DATE=$date" '-DCMAKE_CXX_FLAGS=/MP2' "-DPython3_EXECUTABLE=$env:QA_PYTHON" `
+            "-DCMAKE_INSTALL_PREFIX=$env:GSW_CAMERA_QA/staging" `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             "-DVCPKG_INSTALLED_DIR=$env:GSW_CAMERA_QA/deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw 'Camera configuration failed' }
@@ -179,7 +182,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/setup_native_ci_display.ps1
-          ./scripts/setup_native_ci_graphics.ps1
+          ./scripts/setup_native_ci_graphics.ps1 -OutputDirectory "$env:GSW_CAMERA_QA/mesa"
 
       - name: Observe baseline RED or require candidate GREEN at the real window
         shell: pwsh
@@ -226,6 +229,8 @@ jobs:
         if: always() && env.GSW_CAMERA_EVIDENCE != ''
         with:
           name: native-camera-photos-${{ matrix.kind }}
-          path: ${{ env.GSW_CAMERA_EVIDENCE }}
+          path: |
+            ${{ env.GSW_CAMERA_EVIDENCE }}
+            ${{ env.GSW_CAMERA_QA }}/build/reconstruction-review-evidence
           if-no-files-found: error
           retention-days: 14
