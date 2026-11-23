@@ -20,6 +20,7 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 ## 2026-11-23
 
 - **修复：** 独立 COLMAP 重建及 3DGS／2DGS 的稀疏准备阶段中，迟到的旧快照不再替换较新的点云预览。新快照允许正常减少点数，验收后的最终点云优先显示。不改变重建和训练输出。
+  [修复源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/4d5d8196160bdd7c54b0efdd0f7678e25c8e306e)
 
 ## 2026-11-20
 
