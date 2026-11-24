@@ -1,10 +1,15 @@
 name: Native Camera Photos
 
-# Manual, exact-source pre-push gate. Neither input may alter this workflow
-# or the backend, other test drivers, package trust, or release configuration.
+# Manual, exact-source pre-push gate. Inputs may not alter the workflow,
+# training algorithms, package trust, or release configuration.
 on:
   workflow_dispatch:
     inputs:
+      suite:
+        description: Exact camera cards gate, or the running/retained training preview photo gate
+        type: choice
+        default: camera-cards
+        options: [camera-cards, task-preview-red, task-preview-green]
       candidate:
         description: Unreferenced product commit directly extending the dispatch source
         type: string
@@ -32,11 +37,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kind: [witness, candidate]
+        kind: ${{ fromJSON(inputs.suite == 'task-preview-red' && '["witness"]' || inputs.suite == 'task-preview-green' && '["candidate"]' || '["witness","candidate"]') }}
     runs-on: windows-2022
     timeout-minutes: 45
     env:
       CASE: ${{ matrix.kind }}
+      SUITE: ${{ inputs.suite }}
       SOURCE_ID: ${{ matrix.kind == 'witness' && inputs.witness || inputs.candidate }}
       SOURCE_TREE: ${{ matrix.kind == 'witness' && inputs.witness_tree || inputs.candidate_tree }}
       QT_FORCE_STDERR_LOGGING: "1"
@@ -66,8 +72,20 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $comparison.total_commits -ne 1 -or $comparison.status -ne 'ahead') {
             throw 'Unexpected candidate compare history'
           }
-          $allowed = @('native/src/ReconstructionReviewSmokeTest.cpp')
-          if ($env:CASE -ceq 'candidate') {
+          $taskPreview = $env:SUITE -cin @('task-preview-red', 'task-preview-green')
+          $allowed = if ($taskPreview) { @('native/src/ProcessingCompletionSmokeTest.cpp') }
+                     else { @('native/src/ReconstructionReviewSmokeTest.cpp') }
+          $allowed = @($allowed)
+          if ($taskPreview -and $env:CASE -ceq 'candidate') {
+            $allowed += @(
+              'CHANGELOG.md', 'CHANGELOG.zh-CN.md', 'CHANGELOG.ja.md',
+              'native/README.md', 'native/i18n/catalog.json',
+              'native/backend/reconstruction_review.py',
+              'native/worker/reconstruction_review.py', 'native/worker/test_reconstruction_review.py',
+              'native/src/MainWindow.cpp', 'native/src/MainWindow.h', 'native/src/MainWindowCameraPhotos.cpp',
+              'native/src/NativeViewport.cpp', 'native/src/NativeViewport.h'
+            )
+          } elseif (!$taskPreview -and $env:CASE -ceq 'candidate') {
             $allowed += @(
               'CHANGELOG.md', 'CHANGELOG.zh-CN.md', 'CHANGELOG.ja.md',
               'native/CMakeLists.txt', 'native/README.md', 'native/i18n/catalog.json',
@@ -120,7 +138,7 @@ jobs:
           "TMP=$qa/temp" >> $env:GITHUB_ENV
           [ordered]@{ sourceCommit=$head; sourceTree=$tree; parent=$parent;
             gateCommit=$env:GITHUB_WORKFLOW_SHA; repositoryId=$env:GITHUB_REPOSITORY_ID;
-            runId=$env:GITHUB_RUN_ID; runAttempt=$env:GITHUB_RUN_ATTEMPT; case=$env:CASE } |
+            runId=$env:GITHUB_RUN_ID; runAttempt=$env:GITHUB_RUN_ATTEMPT; case=$env:CASE; suite=$env:SUITE } |
             ConvertTo-Json | Set-Content -LiteralPath "$qa/evidence/source.json" -Encoding utf8
 
       - name: Set up Qt
@@ -171,7 +189,11 @@ jobs:
             "-DVCPKG_INSTALLED_DIR=$env:GSW_CAMERA_QA/deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw 'Camera configuration failed' }
           $targets = @('GaussianSceneWorkbench')
-          if ($env:CASE -ceq 'candidate') { $targets += @('gsw_camera_trajectory_tests','gsw_native_viewport_locale_tests') }
+          if ($env:SUITE -cin @('task-preview-red', 'task-preview-green')) {
+            $targets += 'gsw_process_output_fixture'
+          } elseif ($env:CASE -ceq 'candidate') {
+            $targets += @('gsw_camera_trajectory_tests','gsw_native_viewport_locale_tests')
+          }
           cmake --build "$build" --config Release --parallel --target @targets 2>&1 |
             Tee-Object -FilePath "$env:GSW_CAMERA_EVIDENCE/build.log"
           if ($LASTEXITCODE -ne 0) { throw 'Camera build failed' }
@@ -191,8 +213,14 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           $build = Join-Path $env:GSW_CAMERA_QA 'build'
           $evidence = $env:GSW_CAMERA_EVIDENCE
+          $taskPreview = $env:SUITE -cin @('task-preview-red', 'task-preview-green')
           $names = @('native_reconstruction_review')
-          if ($env:CASE -ceq 'candidate') {
+          if ($taskPreview) {
+            $names = @('native_processing_completion')
+            if ($env:CASE -ceq 'candidate') {
+              $names += @('native_reconstruction_review', 'native_reconstruction_review_contracts')
+            }
+          } elseif ($env:CASE -ceq 'candidate') {
             $names += @('native_camera_trajectory_contract', 'native_viewport_locale_contract')
             foreach ($lang in @('zh_CN','en_US','ja_JP')) {
               foreach ($theme in @('light','dark')) { $names += "native_scene_visibility_${lang}_${theme}" }
@@ -207,8 +235,16 @@ jobs:
           if ((($cases.name | Sort-Object) -join '|') -cne (($names | Sort-Object) -join '|')) {
             throw 'Missing or unexpected camera test cases'
           }
-          if ($env:CASE -ceq 'witness') {
-            $log = Get-Content -Raw -LiteralPath "$evidence/ctest.log"
+          $log = Get-Content -Raw -LiteralPath "$evidence/ctest.log"
+          if ($env:SUITE -ceq 'task-preview-red') {
+            if ($exit -eq 0 -or $null -eq $cases[0].SelectSingleNode('failure') -or
+                $log -cnotmatch 'Processing completion FAIL: live preview opens its verified task original before optimizer completion' -or
+                $log -cmatch 'Processing completion FAIL: (?!live preview opens its verified task original before optimizer completion)') {
+              throw 'Expected original-photo loss on an actual live observation was not isolated'
+            }
+            'REPRODUCED_RED (real Windows live preview lacks its owned original)' |
+              Set-Content -LiteralPath "$evidence/outcome.txt" -Encoding utf8
+          } elseif ($env:CASE -ceq 'witness') {
             if ($exit -eq 0 -or $null -eq $cases[0].SelectSingleNode('failure') -or
                 $log -cnotmatch 'Reconstruction review PASS: real viewport captures the same orthographic comparison' -or
                 $log -cnotmatch 'Reconstruction review FAIL: default camera overlay shows blue cards without green diagnostic rays' -or
@@ -220,6 +256,15 @@ jobs:
           } else {
             if ($exit -ne 0 -or $report.SelectNodes('//testcase/failure | //testcase/skipped').Count -ne 0) {
               throw 'Camera/viewport candidate failed or skipped an expected case'
+            }
+            if ($env:SUITE -ceq 'task-preview-green') {
+              foreach ($backend in @('3dgs', '2dgs')) {
+                foreach ($terminal in @('paused', 'cancelled')) {
+                  if (!$log.Contains("Processing completion PASS: $backend live + $terminal original photo pixels")) {
+                    throw "Missing real preview gallery result for $backend / $terminal"
+                  }
+                }
+              }
             }
             'PASS (scoped real Windows viewport, not full release acceptance)' |
               Set-Content -LiteralPath "$evidence/outcome.txt" -Encoding utf8
