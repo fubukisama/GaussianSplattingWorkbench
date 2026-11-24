@@ -14,6 +14,7 @@
   "对应原图找不到。": {"zh_CN":"对应原图找不到。","en_US":"The corresponding original photo is missing.","ja_JP":"対応する元画像が見つかりません。"},
   "对应原图已变化，未使用替换文件。": {"zh_CN":"对应原图已变化，未使用替换文件。","en_US":"The original photo changed. The replacement was not used.","ja_JP":"元画像が変更されました。置き換えられたファイルは使用していません。"},
   "没有可核实的原图关联。": {"zh_CN":"没有可核实的原图关联。","en_US":"No verifiable link to an original photo.","ja_JP":"確認可能な元画像との対応がありません。"},
+  "已按此训练任务的数据集核对原图，不使用处理后的训练图。": {"zh_CN":"已按此训练任务的数据集核对原图，不使用处理后的训练图。","en_US":"Original verified against this training task’s dataset. Processed training images are not used.","ja_JP":"この学習タスクのデータセットで元画像を照合しました。処理済みの学習画像は使用しません。"},
   "查看当前重建对应的原图；旧模型未保存训练时的图像校验。": {"zh_CN":"查看当前重建对应的原图；旧模型未保存训练时的图像校验。","en_US":"This original is linked to the current reconstruction. The legacy model did not retain training-time image hashes.","ja_JP":"現在の再構築に対応する元画像です。旧モデルには学習時の画像のハッシュが保存されていません。"},
   "按模型记录核对的标定数据集图像；可能不是未处理的相机原片。": {"zh_CN":"按模型记录核对的标定数据集图像；可能不是未处理的相机原片。","en_US":"Calibrated dataset image verified against the model record; it may not be the unprocessed capture.","ja_JP":"モデルの記録と照合したキャリブレーション用データセット画像です。未処理の撮影画像とは異なる場合があります。"},
   "显示稀疏点：%1 · 相机：%2 · 只读": {"zh_CN":"显示稀疏点：%1 · 相机：%2 · 只读","en_US":"Displayed sparse points: %1 · Cameras: %2 · Read-only","ja_JP":"表示中の疎点：%1 · カメラ：%2 · 読み取り専用"},

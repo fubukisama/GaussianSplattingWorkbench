@@ -128,7 +128,7 @@ class Inspection:
         return json.loads(actual.read_text(encoding="utf-8-sig")) if actual else None
 
 
-def _read_model(inspection, model):
+def _read_model(inspection, model, *, include_points=True):
     """Parse recorded calibration/poses; reuse existing format/pose validators.
 
     Sparse stored ERROR is a group statistic, not a per-image reprojection error.
@@ -137,7 +137,7 @@ def _read_model(inspection, model):
     from native.worker.training_reconstruction_summary import _CAMERA_MODELS, _read
     from native.backend.camera_dataset import _quaternion_pose, _colmap_calibration
     extension = "bin" if (model / "images.bin").exists() else "txt"
-    for name in ("cameras", "images", "points3D"):
+    for name in ("cameras", "images", "points3D") if include_points else ("cameras", "images"):
         inspection.capture(model / (name + "." + extension))
     cameras, records, points = {}, [], []
     if extension == "bin":
@@ -174,7 +174,7 @@ def _read_model(inspection, model):
                 records.append((value[0], value[1:5], value[5:8], value[-1], name.decode("utf-8")))
             if stream.read(1):
                 raise ValueError("invalid_model")
-        if (model / "points3D.bin").is_file():
+        if include_points and (model / "points3D.bin").is_file():
             with (model / "points3D.bin").open("rb") as stream:
                 count, = _read(stream, "<Q")
                 if count > MAX_MODEL_BYTES // 51:
@@ -209,7 +209,7 @@ def _read_model(inspection, model):
                 if len(f) != 10 or len(records) >= MAX_FILES or next(stream, None) is None:
                     raise ValueError("invalid_model")
                 records.append((int(f[0]), [float(x) for x in f[1:5]], [float(x) for x in f[5:8]], int(f[8]), f[9]))
-        if (model / "points3D.txt").is_file():
+        if include_points and (model / "points3D.txt").is_file():
             with (model / "points3D.txt").open(encoding="utf-8-sig") as stream:
                 for line in stream:
                     inspection.check()
@@ -238,6 +238,139 @@ def _read_model(inspection, model):
     return rows, points, len(cameras), extension
 
 
+def _review_root(root):
+    for item in (root, *root.parents):
+        if item.is_symlink() or (item.exists() and getattr(item.lstat(), "st_file_attributes", 0) & 0x400):
+            raise ValueError("linked_path_refused")
+    return root.resolve()
+
+
+def _finish_review(report, inspection):
+    # The bytes are captured once, not reopened on the GUI thread. Refuse a
+    # concurrent replacement during inspection; each viewer read checks its
+    # original's captured digest independently before decoding.
+    for item in inspection.files.values():
+        if "modifiedNs" not in item:
+            continue
+        current = safe_path(inspection.root, item["path"]).stat()
+        if current.st_size != item["size"] or str(current.st_mtime_ns) != item["modifiedNs"]:
+            raise ValueError("source_changed")
+    report["snapshots"] = list(inspection.files.values())
+    report["directories"] = inspection.directories
+    identity = dict(dataset=str(inspection.root), group=report.get("selectedGroup"), files=report["snapshots"],
+                    directories=report["directories"])
+    report["identity"] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    return report
+
+
+def review_training_originals(dataset, expected_identity=None, cancelled=None):
+    """Verify only captured originals in the admitted training dataset.
+
+    An old COLMAP workflow can reconstruct input/ by copying images/. Neither
+    directory alone is proof of an original. Use the importer record and the
+    exact full COLMAP name, or the explicit unchanged fixed-camera import.
+    """
+    if not str(dataset).strip():
+        raise ValueError("dataset_unavailable")
+    root = _review_root(Path(dataset).absolute())
+    inspection = Inspection(root, cancelled)
+    locked = bool(expected_identity)
+    group = "locked" if locked else "sparse/0"
+    report = dict(schema="gsw.reconstruction_review/1", version=1, ready=True, dataset=str(root),
+                  sourceKind="locked" if locked else "colmap", selectedGroup=group,
+                  frame="canonical" if locked else "source", photoScope="task_originals", rows=[])
+    manifest = inspection.json(root / "source/metadata_manifest.json")
+    records = manifest.get("files", []) if isinstance(manifest, dict) else []
+    if not isinstance(records, list) or len(records) > MAX_FILES:
+        raise ValueError("invalid_import_manifest")
+
+    def original_snapshot(path, record):
+        try:
+            current = inspection.capture(safe_path(root, path))
+        except (FileNotFoundError, PermissionError):
+            return None
+        if current is None:
+            return None
+        captured = inspection.files[path]
+        if "byteSize" in record and record["byteSize"] != captured["size"]:
+            return None
+        if "sha256" in record and record["sha256"] != captured["sha256"]:
+            return None
+        return captured
+
+    if locked:
+        from native.backend.camera_dataset import load_camera_dataset
+        captured_manifest = inspection.capture(safe_path(root, "camera_dataset.json"), 16 * 1024 * 1024)
+        if captured_manifest is None:
+            return _finish_review(report, inspection)
+        data = load_camera_dataset(captured_manifest, cancelled=cancelled)
+        if data["data_identity"] != expected_identity:
+            raise ValueError("source_changed")
+        report["dataIdentity"] = expected_identity
+        if not (isinstance(manifest, dict) and manifest.get("kind") == "fixed_camera_dataset" and
+                manifest.get("posePolicy") == "locked" and manifest.get("dataIdentity") == expected_identity and
+                manifest.get("normalizationAppliedToImages") is False):
+            return _finish_review(report, inspection)
+        ids = {}
+        for record in records:
+            if isinstance(record, dict) and isinstance(record.get("viewId"), str):
+                view_id = record["viewId"]
+                ids[view_id] = None if view_id in ids else record
+        for view in data["views"]:
+            record, path = ids.get(view["view_id"]), relative_name(view["image_path"])
+            if (record and record.get("kind") == "image" and record.get("archiveMode") == "copy" and
+                    record.get("sourceUnchanged") is True and record.get("relativePath") == path and
+                    record.get("trainingPath") == path and record.get("sha256") == view["sha256"] and
+                    original_snapshot(path, record) is not None):
+                report["rows"].append(dict(id=view["view_id"], name=path, imagePath=path, pose=view))
+    elif records:
+        model = safe_path(root, group)
+        rows, _, _, _ = _read_model(inspection, model, include_points=False)
+        # A collision in either the manifest or the COLMAP index disables that
+        # name, including case/normalization variants on Windows.
+        declared, archive_uses, camera_uses = {}, {}, {}
+        for record in records:
+            if not isinstance(record, dict) or record.get("kind") != "image":
+                continue
+            try:
+                target = relative_name(record.get("trainingPath"))
+            except ValueError:
+                continue
+            folder, separator, name = target.partition("/")
+            if not separator or folded(folder) != "images":
+                continue
+            # A noncanonical but case-equivalent target is a competing
+            # declaration on Windows; it must not let a prior link survive.
+            key = folded(name)
+            duplicate = key in declared
+            declared[key] = None
+            try:
+                archive = relative_name(record.get("archivePath"))
+            except ValueError:
+                continue
+            if (not archive.startswith("source/originals/") or
+                    Path(archive).suffix.lower() not in quality.IMAGE_EXTENSIONS):
+                continue
+            archive_key = folded(archive)
+            archive_uses[archive_key] = archive_uses.get(archive_key, 0) + 1
+            if not duplicate and folder == "images":
+                declared[key] = name, archive, record
+        for row in rows:
+            key = folded(row["name"])
+            camera_uses[key] = camera_uses.get(key, 0) + 1
+        for row in rows:
+            key = folded(row["name"])
+            match = declared.get(key)
+            if (match is None or camera_uses[key] != 1 or row["name"] != match[0] or
+                    archive_uses[folded(match[1])] != 1 or not row["pose"]):
+                continue
+            name, path, record = match
+            if original_snapshot(path, record) is not None:
+                report["rows"].append(dict(id=hashlib.sha256(name.encode()).hexdigest(),
+                                           name=name, imagePath=path, pose=row["pose"]))
+    return _finish_review(report, inspection)
+
+
 def review_dataset(dataset, group=None, camera_dataset=None, expected_identity=None, cancelled=None):
     if not str(dataset).strip():
         raise ValueError("dataset_unavailable")
@@ -245,10 +378,7 @@ def review_dataset(dataset, group=None, camera_dataset=None, expected_identity=N
     if root.is_file():
         camera_dataset, root = str(root), root.parent
     # Refuse linked dataset ancestors as well as linked children.
-    for item in (root, *root.parents):
-        if item.is_symlink() or (item.exists() and getattr(item.lstat(), "st_file_attributes", 0) & 0x400):
-            raise ValueError("linked_path_refused")
-    root = root.resolve()
+    root = _review_root(root)
     inspection = Inspection(root, cancelled)
     inspection.check()
     report = dict(schema="gsw.reconstruction_review/1", version=1, ready=True, dataset=str(root),
@@ -402,21 +532,7 @@ def review_dataset(dataset, group=None, camera_dataset=None, expected_identity=N
         report["registeredCount"] = len(current) if current is not None else None
         if report["originalAvailable"] and current is not None:
             report["unregisteredCount"] = sum(r["original"] and r["registered"] is False for r in report["rows"])
-    # Reject concurrent mutation during inspection. Actions additionally rerun the
-    # full content identity; this stat pass cannot turn stale hashes into a pass.
-    for item in inspection.files.values():
-        if "modifiedNs" not in item:
-            continue
-        current = safe_path(root, item["path"]).stat()
-        if current.st_size != item["size"] or str(current.st_mtime_ns) != item["modifiedNs"]:
-            raise ValueError("source_changed")
-    # Captured file identity is independently rechecked before any navigation or image open.
-    report["snapshots"] = list(inspection.files.values())
-    report["directories"] = inspection.directories
-    identity = dict(dataset=str(root), group=report.get("selectedGroup"), files=report["snapshots"],
-                    directories=report["directories"])
-    report["identity"] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
-    return report
+    return _finish_review(report, inspection)
 
 
 def review_model(model_directory, group=None, camera_dataset=None, cancelled=None):

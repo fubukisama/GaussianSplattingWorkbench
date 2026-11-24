@@ -1567,7 +1567,7 @@ void NativeViewport::setProjectLabel(const QString &label) {
   update();
 }
 
-void NativeViewport::beginProcessingPreview() {
+void NativeViewport::beginProcessingPreview(const TrainingPreviewPhotoScope &photoScope) {
   if (mModelDragActive) finishModelTransform(false);
   if (mScene == mProcessingScene) setProcessingPreviewVisible(false);
   discardProcessingScene();
@@ -1584,6 +1584,7 @@ void NativeViewport::beginProcessingPreview() {
   mProcessingReferenceSelection = mSelectedSceneIds;
   mProcessingReferenceSelected = mModelSelected;
   mProcessingScene = std::make_shared<SceneState>();
+  mProcessingScene->trainingPreviewPhotoScope = photoScope;
   mProcessingPreviewVisible = true;
   ++mSelectionRequestEpoch;
   mSelectionGestureActive = false;
@@ -2239,7 +2240,11 @@ void NativeViewport::setShowCameraPhotos(const bool enabled) {
 
 bool NativeViewport::cameraPhotoContextMatches() const {
   return mCameraPhotoScene.lock() == mScene &&
-         mCameraPhotoTrajectoryGeneration == mScene->mCameraTrajectoryGeneration;
+         mCameraPhotoTrajectoryGeneration == mScene->mPublishedCameraTrajectoryRevision;
+}
+
+TrainingPreviewPhotoScope NativeViewport::trainingPreviewPhotoScope() const {
+  return displayingProcessingPreview() ? mScene->trainingPreviewPhotoScope : TrainingPreviewPhotoScope{};
 }
 
 QString NativeViewport::cameraInputDataIdentity() const {
@@ -2268,10 +2273,13 @@ bool NativeViewport::highlightCameraPhoto(const qsizetype index) {
 }
 
 void NativeViewport::replaceCameraPhotoReferences(QHash<qsizetype, CameraPhotoReference> references) {
-  if (cameraPhotoContextMatches() && mCameraPhotoReferences == references) return;
+  if (mCameraPhotoScene.lock() == mScene && mCameraPhotoReferences == references) {
+    mCameraPhotoTrajectoryGeneration = mScene->mPublishedCameraTrajectoryRevision;
+    return;
+  }
   ++*mCameraPhotoEpoch;
   mCameraPhotoScene = mScene;
-  mCameraPhotoTrajectoryGeneration = mScene->mCameraTrajectoryGeneration;
+  mCameraPhotoTrajectoryGeneration = mScene->mPublishedCameraTrajectoryRevision;
   mCameraPhotoReferences = std::move(references);
   mCameraThumbnails.clear();
   mWantedCameraThumbnails.clear();
@@ -2298,7 +2306,7 @@ void NativeViewport::setCameraPhotoDataset(const QString &root, const QString &i
   replaceCameraPhotoReferences(std::move(references));
 }
 
-void NativeViewport::setCameraPhotoReview(const QJsonObject &report) {
+void NativeViewport::setCameraPhotoReview(const QJsonObject &report, const QString &taskCameraIdentity) {
   const auto fromReport = cameraPhotoReferences(report);
   const auto reviewed = CameraTrajectory::fromReconstructionReview(report);
   QHash<qsizetype, CameraPhotoReference> references;
@@ -2309,6 +2317,26 @@ void NativeViewport::setCameraPhotoReview(const QJsonObject &report) {
     for (qsizetype index = 0; index < cameras.size(); ++index) {
       const auto ref = fromReport.constFind(cameras[index].viewId);
       if (ref != fromReport.cend()) references.insert(index, *ref);
+    }
+  } else if (!mReconstructionReviewOnly && validCameraPhotoDigest(taskCameraIdentity) &&
+             report.value(QStringLiteral("photoScope")) == QJsonValue(QStringLiteral("task_originals")) &&
+             report.value(QStringLiteral("sourceKind")) == QJsonValue(QStringLiteral("locked")) &&
+             report.value(QStringLiteral("dataIdentity")) == QJsonValue(taskCameraIdentity)) {
+    // Fixed-camera tasks explicitly write the stable view ID as img_name in
+    // their OWN compatibility camera list. Bound models additionally record
+    // the relative source path and digest. Never join either to a basename.
+    const auto inputIdentity = cameraInputDataIdentity();
+    const bool legacy = inputIdentity.isEmpty();
+    QHash<QString, qsizetype> uses;
+    for (const auto &camera : cameras) ++uses[legacy ? camera.imageName : camera.viewId];
+    for (qsizetype index = 0; index < cameras.size(); ++index) {
+      const auto &camera = cameras[index];
+      const auto &id = legacy ? camera.imageName : camera.viewId;
+      const auto ref = fromReport.constFind(id);
+      if (ref == fromReport.cend() || uses.value(id) != 1) continue;
+      if (legacy || (inputIdentity == taskCameraIdentity && camera.imageName == ref->relativePath &&
+                     camera.imageSha256 == ref->sha256))
+        references.insert(index, *ref);
     }
   } else if (!mReconstructionReviewOnly && cameraInputDataIdentity().isEmpty() &&
              report.value(QStringLiteral("sourceKind")) == QJsonValue(QStringLiteral("colmap")) &&
@@ -4143,6 +4171,7 @@ void NativeViewport::reloadCameraTrajectory(const QString &scenePath,
   const int generation = ++mScene->mCameraTrajectoryGeneration;
   if (clearExisting || scenePath.isEmpty()) {
     mScene->mCameraTrajectory = {};
+    ++mScene->mPublishedCameraTrajectoryRevision;
     rebuildCameraGeometry();
     emit cameraTrajectoryChanged(0, 0, false, QString(), QString());
   }
@@ -4167,6 +4196,7 @@ void NativeViewport::reloadCameraTrajectory(const QString &scenePath,
               return;
             }
             mScene->mCameraTrajectory = std::move(trajectory);
+            ++mScene->mPublishedCameraTrajectoryRevision;
             rebuildCameraGeometry();
             emit cameraTrajectoryChanged(
                 cameraCount(), mScene->mCameraTrajectory.invalidCameraCount(),
@@ -4202,7 +4232,9 @@ void NativeViewport::refreshActiveSceneMetadata() {
     coordinates.metersPerCoordinate=result.first.metersPerCoordinate;coordinates.scaleStatus=result.first.scaleStatus;
     coordinates.sourceUnit=result.first.sourceUnit;coordinates.dataIdentity=result.first.dataIdentity;
     coordinates.provenance=result.first.provenance;coordinates.validationError=result.first.validationError;
-    target->mCameraTrajectory=std::move(result.second);rebuildCameraGeometry();
+    target->mCameraTrajectory=std::move(result.second);
+    ++target->mPublishedCameraTrajectoryRevision;
+    rebuildCameraGeometry();
     // Bounds/rebasing, per-object TRS, edits, selection and the worker are
     // deliberately untouched. Both model and cameras share this same layer.
     if(foreground)publishActiveSceneState();
@@ -7296,6 +7328,7 @@ bool NativeViewport::setReconstructionReviewData(const QJsonObject &report) {
   mReviewOriginalView.reset();
   mProjectLabel = report.value(QStringLiteral("selectedGroup")).toString();
   mScene->mCameraTrajectory = std::move(cameras);
+  ++mScene->mPublishedCameraTrajectoryRevision;
   mScene->mPreviewOnlyScene = true;
   SceneCoordinateInfo coordinates; coordinates.valid = true;
   QList<SceneCoordinate3D> bounds;

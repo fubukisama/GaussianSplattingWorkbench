@@ -84,6 +84,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QListWidget>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
@@ -1026,10 +1027,11 @@ MainWindow::MainWindow(QWidget *parent)
 }
 
 MainWindow::~MainWindow() {
-  ++*mCameraPhotoViewEpoch;
+  stopCameraPhotoCallbacks();
   if (mCameraPhotoInspection) {
-    mCameraPhotoInspection->disconnect(this);
-    mCameraPhotoInspection->kill();
+    auto *process = std::exchange(mCameraPhotoInspection, nullptr);
+    process->disconnect(this);
+    process->kill();
   }
   mProcessSupervisor.shutdown();
   if (mDiscardRecoveryOnDestruction) {
@@ -3182,7 +3184,10 @@ void MainWindow::connectServices() {
               mLiveTrainingPreviewIntegrity = {};
               mLastTrainingPreviewIteration = -1;
               mLastTrainingSparsePreviewIteration = -1;
-              mViewport->beginProcessingPreview();
+              mViewport->beginProcessingPreview({mPendingTraining->projectRoot,
+                  mPendingTraining->datasetPath, mPendingTraining->outputDirectory,
+                  QUuid::createUuid().toString(QUuid::Id128),
+                  mPendingTraining->photoCameraDatasetIdentity});
               mTrainingMonitor->beginTraining(
                   taskName, mPendingTraining->backend,
                   mPendingTraining->expectedIterations);
@@ -3363,6 +3368,7 @@ void MainWindow::connectServices() {
         // or bookkeeping failure. Still validate/publish its result normally.
         bool effectiveSucceeded = succeeded || optimizerCompleted;
         bool recoveryFailed = false;
+        bool pausedResultAssociated = false;
         QString completionDetail;
 
         if (finishingBatch) {
@@ -3620,6 +3626,7 @@ void MainWindow::connectServices() {
                   const QString resultId = archivedResultId;
                   if (mWorkspace.publishGeneratedScene(partial->path, resultId, &sceneError)) {
                     if (paused) {
+                      pausedResultAssociated = true;
                       QString saveError;
                       if (mWorkspace.projectFilePath().isEmpty() || mWorkspace.saveManifest({}, &saveError)) {
                         auto active = loadActiveTrainingJob(pending.projectRoot);
@@ -3783,7 +3790,7 @@ void MainWindow::connectServices() {
           // observation on screen with all model tools unavailable.
           if (finishingBatch) mViewport->setProcessingPreviewVisible(false);
           mViewport->finishProcessingPreview(effectiveSucceeded, cancelled, paused);
-          if ((finishingTraining && (effectiveSucceeded || paused)) || finishingBatch)
+          if ((finishingTraining && (effectiveSucceeded || pausedResultAssociated)) || finishingBatch)
             mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
           if (finishingMesh) {
             mViewport->setSceneObjects(mWorkspace.sceneObjects(), mWorkspace.activeSceneId());
@@ -3976,7 +3983,7 @@ void MainWindow::connectServices() {
             appendTaskEvent(QCoreApplication::translate("Workbench", "场景读取失败：%1").arg(message));
           });
   connect(
-      mViewport, &NativeViewport::cameraTrajectoryChanged, this,
+      mViewport, &NativeViewport::cameraTrajectoryChanged, mCameraPhotoCallbacks,
       [this](const qsizetype cameraCount, const qsizetype invalidCameraCount,
              const bool displayDecimated, const QString &sourcePath,
              const QString &error) {
@@ -7360,9 +7367,10 @@ void MainWindow::resumeTrainingJob(const ActiveTrainingJob &active, const QStrin
     return;
   }
   mPendingTraining = PendingTraining{taskName, comparablePath(mWorkspace.rootPath()), comparablePath(dataset), output, backend, total, resultId, previous};
+  mPendingTraining->photoCameraDatasetIdentity = resumeCameraOptions.posePolicy == QStringLiteral("locked")
+      ? config.value(QStringLiteral("cameraDatasetIdentity")).toString() : QString();
   mPendingTraining->observation = TrainingObservationAdmission(previewRun, backend,
-      resumeCameraOptions.posePolicy == QStringLiteral("locked")
-          ? config.value(QStringLiteral("cameraDatasetIdentity")).toString() : QString(), output);
+      mPendingTraining->photoCameraDatasetIdentity, output);
   mPendingTraining->historyId = experiment.id;
   mPauseRequested = false;
   mLiveReconstructionPreviewPath.clear();
@@ -7382,46 +7390,106 @@ void MainWindow::resumeTrainingJob(const ActiveTrainingJob &active, const QStrin
 }
 
 void MainWindow::refreshCameraPhotoBinding(const bool newTrajectory) {
-  if (!mCameraPhotoDock || !mShowCameraPhotosAction) return;
-  const auto dataset = mWorkspace.datasetPath();
+  if (!mCameraPhotoCallbacks || !mCameraPhotoDock || !mShowCameraPhotosAction) return;
+  auto dataset = mWorkspace.datasetPath();
   const auto scene = mViewport->scenePath();
   const auto modelIdentity = mViewport->cameraInputDataIdentity();
+  const auto source = mCameraSourcePath.isEmpty() ? QString() : QFileInfo(mCameraSourcePath).canonicalFilePath();
+  const bool preview = mViewport->displayingProcessingPreview();
+  const auto task = mViewport->trainingPreviewPhotoScope();
   const bool requested = (mShowCamerasAction->isChecked() && mShowCameraPhotosAction->isChecked()) ||
                          mCameraPhotoDock->isVisible();
-  const auto key = QStringList{mWorkspace.rootPath(), dataset, mWorkspace.cameraDatasetIdentity(),
-      scene, mWorkspace.activeSceneId(), mCameraSourcePath, modelIdentity,
+  bool taskOriginals = preview;
+  bool inspect = false;
+  QString taskIdentity;
+  if (preview) {
+    // Only the accepted training observation may bring along this scope.
+    // A reference model (or the project dropdown) cannot supply its dataset.
+    dataset.clear();
+    const auto cameras = QDir(task.outputRoot).filePath(QStringLiteral("cameras.json"));
+    if (!task.runId.isEmpty() && !task.datasetPath.isEmpty() && !source.isEmpty() &&
+        pathsReferToSameLocation(task.projectRoot, mWorkspace.rootPath()) &&
+        pathIsWithinDirectory(scene, task.outputRoot) && pathIsWithinDirectory(source, task.outputRoot) &&
+        (modelIdentity.isEmpty() ? pathsReferToSameLocation(source, cameras)
+                                : modelIdentity == task.cameraDatasetIdentity)) {
+      dataset = task.datasetPath;
+      taskIdentity = task.cameraDatasetIdentity;
+      inspect = true;
+    }
+  } else if (requested && !scene.isEmpty() && !source.isEmpty() && mViewport->cameraCount() > 0 &&
+             pathsReferToSameLocation(scene, mWorkspace.scenePath())) {
+    qsizetype completedOwners = 0, retainedOwners = 0;
+    const auto checkpointRoot = QDir(mWorkspace.rootPath()).filePath(QStringLiteral(".gsw/checkpoints/training"));
+    for (const auto &experiment : GenerationHistoryStore(mWorkspace.rootPath()).records()) {
+      if (experiment.pipeline != QStringLiteral("training") ||
+          experiment.resultSceneId != mWorkspace.activeSceneId() ||
+          (experiment.backend != QStringLiteral("3dgs") && experiment.backend != QStringLiteral("2dgs")) ||
+          !pathsReferToSameLocation(experiment.resultPath, scene)) continue;
+      if (experiment.status == QStringLiteral("paused") || experiment.status == QStringLiteral("cancelled")) {
+        ++retainedOwners;
+        taskOriginals = true;
+        const bool copiedCheckpoint = pathIsWithinDirectory(scene, checkpointRoot) &&
+            pathsReferToSameLocation(QFileInfo(source).absolutePath(), QFileInfo(scene).absolutePath());
+        const bool ownOutput = pathIsWithinDirectory(scene, experiment.outputRoot) &&
+            pathIsWithinDirectory(source, experiment.outputRoot);
+        if (!experiment.datasetPath.isEmpty() && (copiedCheckpoint || ownOutput)) {
+          dataset = experiment.datasetPath;
+          taskIdentity = experiment.parameters.value(QStringLiteral("posePolicy")) == QJsonValue(QStringLiteral("locked"))
+              ? experiment.parameters.value(QStringLiteral("cameraDatasetIdentity")).toString() : QString();
+          inspect = modelIdentity.isEmpty() || modelIdentity == taskIdentity;
+        }
+      } else if (experiment.status == QStringLiteral("completed") && !dataset.isEmpty() &&
+                 pathsReferToSameLocation(experiment.datasetPath, dataset)) {
+        const auto output = QDir(experiment.outputRoot).canonicalPath();
+        if (!output.isEmpty() && source.startsWith(output + QLatin1Char('/'), localPathCaseSensitivity()))
+          ++completedOwners;
+      }
+    }
+    if (taskOriginals) inspect = retainedOwners == 1 && inspect;
+    else inspect = completedOwners == 1 && modelIdentity.isEmpty();
+  }
+  const auto key = QStringList{mWorkspace.rootPath(), dataset,
+      taskOriginals ? taskIdentity : mWorkspace.cameraDatasetIdentity(),
+      preview ? task.runId : scene, preview ? QString() : mWorkspace.activeSceneId(),
+      source, modelIdentity, taskOriginals ? QStringLiteral("originals") : QStringLiteral("result"),
+      inspect ? QStringLiteral("owned") : QStringLiteral("unlinked"),
       requested ? QStringLiteral("photos") : QStringLiteral("cards")}.join(QLatin1Char('\n'));
-  if (!newTrajectory && key == mCameraPhotoLookupKey) return;
+  if (key == mCameraPhotoLookupKey && (!newTrajectory || preview)) {
+    if (newTrajectory) {
+      // Geometry files rotate during a task. Re-associate the already
+      // verified report with the freshly published camera poses, not disk.
+      bool namesChanged = false;
+      if (mCameraPhotoDock->isVisible()) {
+        namesChanged = mCameraPhotosList->count() != mViewport->cameraCount();
+        for (int i = 0; !namesChanged && i < mCameraPhotosList->count(); ++i) {
+          const auto name = mViewport->cameraPhotoName(i);
+          namesChanged = mCameraPhotosList->item(i)->text() != (name.isEmpty()
+              ? QCoreApplication::translate("Workbench", "相机 %1").arg(i+1) : name);
+        }
+        if (namesChanged) mCameraPhotoSelected = -1;
+      }
+      if (!mCameraPhotoTaskReport.isEmpty()) mViewport->setCameraPhotoReview(mCameraPhotoTaskReport, taskIdentity);
+      if (namesChanged) rebuildCameraPhotoList();
+      refreshCameraPhotoCaption();
+    }
+    return;
+  }
   mCameraPhotoLookupKey = key;
   if (newTrajectory) mCameraPhotoSelected = -1;
   ++*mCameraPhotoViewEpoch;
   mCameraPhotoLegacy = false;
+  mCameraPhotoTaskOriginals = taskOriginals;
+  mCameraPhotoTaskReport = {};
   if (mCameraPhotoInspection) {
     auto *old = std::exchange(mCameraPhotoInspection, nullptr);
     old->disconnect(this);
     old->kill();
     old->deleteLater();
   }
-  mViewport->setCameraPhotoDataset(dataset, mWorkspace.cameraDatasetIdentity());
+  mViewport->setCameraPhotoDataset(taskOriginals ? QString() : dataset,
+      taskOriginals ? QString() : mWorkspace.cameraDatasetIdentity());
   if (mCameraPhotoDock->isVisible()) rebuildCameraPhotoList();
-  if (!requested || !modelIdentity.isEmpty() || mViewport->cameraCount() <= 0 ||
-      dataset.isEmpty() || scene.isEmpty() || !pathsReferToSameLocation(scene, mWorkspace.scenePath())) return;
-
-  // A loose model or a neighboring cameras.json may not choose a photo root.
-  // For unbound COLMAP records admit only the exact retained experiment in
-  // the current workspace, whose camera record and result are in its output.
-  const auto source = QFileInfo(mCameraSourcePath).canonicalFilePath();
-  qsizetype owners = 0;
-  for (const auto &experiment : GenerationHistoryStore(mWorkspace.rootPath()).records()) {
-    if (experiment.status != QStringLiteral("completed") || experiment.pipeline != QStringLiteral("training") ||
-        experiment.resultSceneId != mWorkspace.activeSceneId() ||
-        (experiment.backend != QStringLiteral("3dgs") && experiment.backend != QStringLiteral("2dgs")) ||
-        !pathsReferToSameLocation(experiment.resultPath, scene) ||
-        !pathsReferToSameLocation(experiment.datasetPath, dataset)) continue;
-    const auto output = QDir(experiment.outputRoot).canonicalPath();
-    if (!output.isEmpty() && source.startsWith(output + QLatin1Char('/'), Qt::CaseInsensitive)) ++owners;
-  }
-  if (owners != 1) return;
+  if (!requested || !inspect || dataset.isEmpty() || mViewport->cameraCount() <= 0) return;
   const auto root = BackendLocator::findRepositoryRoot(QCoreApplication::applicationDirPath(),
                                                        qEnvironmentVariable("GSW_BACKEND_ROOT"));
   const auto python = findTrainingPython(root);
@@ -7434,9 +7502,15 @@ void MainWindow::refreshCameraPhotoBinding(const bool newTrajectory) {
   process->setProgram(python);
   process->setWorkingDirectory(root);
   process->setProcessEnvironment(env.environment);
-  process->setArguments({QStringLiteral("-B"), QDir(root).filePath(QStringLiteral("native/worker/reconstruction_review.py")),
-      QStringLiteral("--backend-root"), root, QStringLiteral("--dataset"), dataset,
-      QStringLiteral("--group"), QStringLiteral("sparse/0")});
+  QStringList arguments{QStringLiteral("-B"), QDir(root).filePath(QStringLiteral("native/worker/reconstruction_review.py")),
+      QStringLiteral("--backend-root"), root, QStringLiteral("--dataset"), dataset};
+  if (taskOriginals) {
+    arguments.append(QStringLiteral("--task-originals"));
+    if (!taskIdentity.isEmpty()) arguments.append({QStringLiteral("--expected-identity"), taskIdentity});
+  } else {
+    arguments.append({QStringLiteral("--group"), QStringLiteral("sparse/0")});
+  }
+  process->setArguments(arguments);
   connect(process, &QProcess::readyReadStandardOutput, this, [process, stdoutBytes] {
     *stdoutBytes += process->readAllStandardOutput();
     if (stdoutBytes->size() > 32 * 1024 * 1024) process->kill();
@@ -7449,7 +7523,7 @@ void MainWindow::refreshCameraPhotoBinding(const bool newTrajectory) {
     refreshCameraPhotoCaption();
   });
   connect(process, qOverload<int,QProcess::ExitStatus>(&QProcess::finished), this,
-      [this,process,stdoutBytes,key,dataset](int code, QProcess::ExitStatus status) {
+      [this,process,stdoutBytes,key,dataset,taskOriginals,taskIdentity](int code, QProcess::ExitStatus status) {
         if (mCameraPhotoInspection != process) return;
         mCameraPhotoInspection = nullptr;
         *stdoutBytes += process->readAllStandardOutput();
@@ -7457,9 +7531,11 @@ void MainWindow::refreshCameraPhotoBinding(const bool newTrajectory) {
         if (mCameraPhotoLookupKey == key && status == QProcess::NormalExit && code == 0 &&
             stdoutBytes->size() <= 32 * 1024 * 1024) {
           const auto report = QJsonDocument::fromJson(*stdoutBytes).object();
-          if (pathsReferToSameLocation(report.value(QStringLiteral("dataset")).toString(), dataset)) {
-            mCameraPhotoLegacy = true;
-            mViewport->setCameraPhotoReview(report);
+          if (pathsReferToSameLocation(report.value(QStringLiteral("dataset")).toString(), dataset) &&
+              (!taskOriginals || report.value(QStringLiteral("photoScope")) == QJsonValue(QStringLiteral("task_originals")))) {
+            mCameraPhotoLegacy = !taskOriginals;
+            if (taskOriginals) mCameraPhotoTaskReport = report;
+            mViewport->setCameraPhotoReview(report, taskIdentity);
           }
         }
         refreshCameraPhotoCaption();
@@ -7780,8 +7856,10 @@ void MainWindow::startTraining() {
       taskName, comparablePath(mWorkspace.rootPath()),
       comparablePath(mWorkspace.datasetPath()), outputDirectory,
       config.backend, config.iterations, resultId, previous};
+  mPendingTraining->photoCameraDatasetIdentity = config.posePolicy == QStringLiteral("locked")
+      ? config.cameraDatasetIdentity : QString();
   mPendingTraining->observation = TrainingObservationAdmission(previewRun, config.backend,
-      config.posePolicy == QStringLiteral("locked") ? config.cameraDatasetIdentity : QString(), outputDirectory);
+      mPendingTraining->photoCameraDatasetIdentity, outputDirectory);
   mPendingTraining->historyId = experiment.id;
   mPauseRequested = false;
   mLiveReconstructionPreviewPath.clear();

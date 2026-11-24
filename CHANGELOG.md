@@ -22,6 +22,8 @@ separate claims.
 
 ## 2026-11-24
 
+- **Fixed: Original photos in task previews.** View the corresponding original from the task's own dataset during 3DGS or 2DGS training, and on previews retained after pausing or cancelling. Missing or ambiguous original links remain unavailable; same-name processed training images are never substituted. No retraining or source-image changes are required.
+
 - **Fixed: Project tree selection.** After the last model is unloaded, clicking a project row no longer selects the entire tree. Clicking blank space clears the selection; Ctrl+A selects only model rows. Model files are not changed. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/516af6cee79879f61b91b3f422453636bbdd2df2)
 
 ## 2026-11-23

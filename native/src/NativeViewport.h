@@ -65,6 +65,16 @@ class RenderFrameDiagnostics;
 enum class ReferenceGridPlane;
 struct ReferenceGridScale;
 
+// A task-owned observation outlives the worker while its scene is retained.
+// It must never acquire a dataset from the currently selected reference model.
+struct TrainingPreviewPhotoScope final {
+  QString projectRoot;
+  QString datasetPath;
+  QString outputRoot;
+  QString runId;
+  QString cameraDatasetIdentity;
+};
+
 class NativeViewport final : public QOpenGLWidget,
                              protected QOpenGLExtraFunctions {
   Q_OBJECT
@@ -98,7 +108,7 @@ public:
 
   void setProjectLabel(const QString &label);
   void setScene(const QString &scenePath, qint64 gaussianCount);
-  void beginProcessingPreview();
+  void beginProcessingPreview(const TrainingPreviewPhotoScope &photoScope = {});
   void setProcessingStage(const QString &stage, int iteration = -1, int total = -1,
                           int progress = -1);
   void finishProcessingPreview(bool succeeded, bool cancelled, bool paused = false);
@@ -110,6 +120,8 @@ public:
   [[nodiscard]] bool processingPreviewPaused() const { return mProcessingPreviewPaused; }
   [[nodiscard]] bool processingPreviewVisible() const { return mProcessingPreviewVisible; }
   [[nodiscard]] bool hasProcessingPreview() const { return mProcessingScene && mProcessingHasFrame; }
+  [[nodiscard]] bool displayingProcessingPreview() const { return mScene == mProcessingScene; }
+  [[nodiscard]] TrainingPreviewPhotoScope trainingPreviewPhotoScope() const;
   [[nodiscard]] QString processingPreviewLabel() const;
   [[nodiscard]] QString processingPreviewDetail() const;
   void setSceneObjects(const QList<SceneObject> &objects, const QString &activeId);
@@ -130,7 +142,7 @@ public:
   void setShowCameraRecordOrder(bool enabled);
   void setShowCameraPhotos(bool enabled);
   void setCameraPhotoDataset(const QString &root, const QString &inputIdentity);
-  void setCameraPhotoReview(const QJsonObject &report);
+  void setCameraPhotoReview(const QJsonObject &report, const QString &taskCameraIdentity = {});
   [[nodiscard]] QString cameraInputDataIdentity() const;
   [[nodiscard]] QString cameraPhotoName(qsizetype index) const;
   [[nodiscard]] QString cameraPhotoViewId(qsizetype index) const;
@@ -464,6 +476,8 @@ private:
     qint64 queuedPreviewCount = 0;
     qint64 requestedPreviewCount = 0;
     int mCameraTrajectoryGeneration = 0;
+    int mPublishedCameraTrajectoryRevision = 0;
+    TrainingPreviewPhotoScope trainingPreviewPhotoScope;
     int mMetadataGeneration = 0;
     qint64 metadataSourceSize = -1;
     qint64 metadataSourceModified = -1;

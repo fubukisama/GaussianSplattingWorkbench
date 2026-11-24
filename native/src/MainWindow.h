@@ -111,6 +111,7 @@ private:
     bool launched = false;
     QString historyId;
     TrainingObservationAdmission observation;
+    QString photoCameraDatasetIdentity;
   };
 
   struct PendingReconstruction {
@@ -139,6 +140,7 @@ private:
   void createProjectDock();
   void createInspectorDock();
   void createCameraPhotoDock();
+  void stopCameraPhotoCallbacks();
   void refreshCameraPhotoBinding(bool newTrajectory = false);
   void rebuildCameraPhotoList();
   void inspectCameraPhoto(qsizetype index, bool original);
@@ -364,6 +366,7 @@ private:
   QAction *mShowCameraFrustumsAction = nullptr;
   QAction *mShowCameraOrderAction = nullptr;
   QDockWidget *mCameraPhotoDock = nullptr;
+  QObject *mCameraPhotoCallbacks = nullptr;
   QListWidget *mCameraPhotosList = nullptr;
   QLabel *mCameraPhotoCaption = nullptr;
   QLabel *mCameraPhotoImage = nullptr;
@@ -373,10 +376,12 @@ private:
   QFileSystemWatcher *mCameraPhotoOriginalWatcher = nullptr;
   QProcess *mCameraPhotoInspection = nullptr;
   QString mCameraPhotoLookupKey;
+  QJsonObject mCameraPhotoTaskReport;
   qsizetype mCameraPhotoSelected = -1;
   CameraPhotoStatus mCameraPhotoStatus = CameraPhotoStatus::Unlinked;
   bool mCameraPhotoPending = false;
   bool mCameraPhotoLegacy = false;
+  bool mCameraPhotoTaskOriginals = false;
   std::shared_ptr<std::atomic<quint64>> mCameraPhotoViewEpoch =
       std::make_shared<std::atomic<quint64>>(0);
   QAction *mTaskPreviewAction = nullptr;

@@ -20,9 +20,12 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <utility>
+
 namespace gsw {
 
 void MainWindow::createCameraPhotoDock() {
+  mCameraPhotoCallbacks = new QObject(this);
   mCameraPhotoDock = new QDockWidget(this);
   mCameraPhotoDock->setObjectName(QStringLiteral("cameraPhotoDock"));
   AppLanguage::bind(mCameraPhotoDock, "windowTitle", AppLanguage::source("相机照片"));
@@ -63,7 +66,7 @@ void MainWindow::createCameraPhotoDock() {
   mCameraPhotoReadPool = new QThreadPool(this);
   mCameraPhotoReadPool->setMaxThreadCount(1);
   mCameraPhotoOriginalWatcher = new QFileSystemWatcher(this);
-  connect(mCameraPhotoOriginalWatcher, &QFileSystemWatcher::fileChanged, this, [this](const QString &path) {
+  connect(mCameraPhotoOriginalWatcher, &QFileSystemWatcher::fileChanged, mCameraPhotoCallbacks, [this](const QString &path) {
     const auto ref = mViewport->cameraPhotoReference(mCameraPhotoSelected);
     if (ref.relativePath.isEmpty() || QDir(ref.datasetRoot).filePath(ref.relativePath) != path) return;
     ++*mCameraPhotoViewEpoch;
@@ -74,7 +77,7 @@ void MainWindow::createCameraPhotoDock() {
     refreshCameraPhotoCaption();
   });
 
-  connect(mViewport, &NativeViewport::cameraPhotoContextChanged, this, [this] {
+  connect(mViewport, &NativeViewport::cameraPhotoContextChanged, mCameraPhotoCallbacks, [this] {
     ++*mCameraPhotoViewEpoch;
     mCameraPhotoReadPool->clear();
     if (!mCameraPhotoOriginalWatcher->files().isEmpty())
@@ -83,7 +86,7 @@ void MainWindow::createCameraPhotoDock() {
     mCameraPhotoPending = false;
     if (mCameraPhotoDock->isVisible()) rebuildCameraPhotoList();
   });
-  connect(mCameraPhotoDock, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+  connect(mCameraPhotoDock, &QDockWidget::visibilityChanged, mCameraPhotoCallbacks, [this](bool visible) {
     if (!visible) {
       ++*mCameraPhotoViewEpoch;
       mCameraPhotoReadPool->clear();
@@ -95,7 +98,7 @@ void MainWindow::createCameraPhotoDock() {
     refreshCameraPhotoBinding();
     if (visible) rebuildCameraPhotoList();
   });
-  connect(mViewport, &NativeViewport::cameraCardActivated, this, [this](qsizetype index, bool original) {
+  connect(mViewport, &NativeViewport::cameraCardActivated, mCameraPhotoCallbacks, [this](qsizetype index, bool original) {
     mCameraPhotoSelected = index;
     if (!original && !mCameraPhotoDock->isVisible()) return;
     if (original) mCameraPhotoDock->show();
@@ -104,18 +107,18 @@ void MainWindow::createCameraPhotoDock() {
     if (auto *item = mCameraPhotosList->currentItem()) mCameraPhotosList->scrollToItem(item);
     inspectCameraPhoto(index, original);
   });
-  connect(mCameraPhotosList, &QListWidget::currentRowChanged, this, [this](int row) {
+  connect(mCameraPhotosList, &QListWidget::currentRowChanged, mCameraPhotoCallbacks, [this](int row) {
     (void)mViewport->highlightCameraPhoto(row);
     inspectCameraPhoto(row, false);
   });
   const auto locate = [this] {
     if (mCameraPhotoSelected >= 0) (void)mViewport->setSourceCameraView(mCameraPhotoSelected);
   };
-  connect(mCameraLocatePose, &QPushButton::clicked, this, locate);
-  connect(mCameraPhotosList, &QListWidget::itemActivated, this, [locate](QListWidgetItem *) { locate(); });
-  connect(mCameraViewOriginal, &QPushButton::clicked, this,
+  connect(mCameraLocatePose, &QPushButton::clicked, mCameraPhotoCallbacks, locate);
+  connect(mCameraPhotosList, &QListWidget::itemActivated, mCameraPhotoCallbacks, [locate](QListWidgetItem *) { locate(); });
+  connect(mCameraViewOriginal, &QPushButton::clicked, mCameraPhotoCallbacks,
           [this] { inspectCameraPhoto(mCameraPhotoSelected, true); });
-  AppLanguage::onChanged(mCameraPhotoDock, [this] {
+  AppLanguage::onChanged(mCameraPhotoCallbacks, [this] {
     if (mCameraPhotoDock->isVisible()) {
       for (int i = 0; i < mCameraPhotosList->count(); ++i)
         if (mViewport->cameraPhotoName(i).isEmpty())
@@ -124,6 +127,14 @@ void MainWindow::createCameraPhotoDock() {
     refreshCameraPhotoCaption();
   });
   refreshCameraPhotoCaption();
+}
+
+void MainWindow::stopCameraPhotoCallbacks() {
+  ++*mCameraPhotoViewEpoch;
+  // QWidget teardown can still emit dock visibility signals after the
+  // MainWindow members used by those callbacks have been destroyed.
+  delete std::exchange(mCameraPhotoCallbacks, nullptr);
+  if (mCameraPhotoReadPool) mCameraPhotoReadPool->clear();
 }
 
 void MainWindow::rebuildCameraPhotoList() {
@@ -155,7 +166,10 @@ void MainWindow::refreshCameraPhotoCaption() {
     const auto reason = cameraPhotoStatusText(ref.relativePath.isEmpty() ?
         CameraPhotoStatus::Unlinked : mCameraPhotoStatus);
     if (!reason.isEmpty()) caption += (caption.isEmpty() ? QString() : QStringLiteral("\n")) + reason;
-    if (mCameraPhotoLegacy && !ref.relativePath.isEmpty())
+    if (mCameraPhotoTaskOriginals && !ref.relativePath.isEmpty())
+      caption += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
+          "已按此训练任务的数据集核对原图，不使用处理后的训练图。");
+    else if (mCameraPhotoLegacy && !ref.relativePath.isEmpty())
       caption += QLatin1Char('\n') + QCoreApplication::translate("Workbench",
           "查看当前重建对应的原图；旧模型未保存训练时的图像校验。");
     else if (!ref.relativePath.isEmpty())
@@ -183,7 +197,7 @@ void MainWindow::inspectCameraPhoto(qsizetype index, const bool original) {
   mCameraPhotoPending = true;
   refreshCameraPhotoCaption();
   auto *watcher = new QFutureWatcher<CameraPhotoRead>(this);
-  connect(watcher, &QFutureWatcher<CameraPhotoRead>::finished, this, [this,watcher,generation,ref,index] {
+  connect(watcher, &QFutureWatcher<CameraPhotoRead>::finished, mCameraPhotoCallbacks, [this,watcher,generation,ref,index] {
     watcher->deleteLater();
     if (generation != mCameraPhotoViewEpoch->load() || ref != mViewport->cameraPhotoReference(index) ||
         !mCameraPhotoDock->isVisible()) return;

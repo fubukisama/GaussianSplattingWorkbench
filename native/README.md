@@ -124,6 +124,16 @@ without historical hashes they cannot reproduce training-time image bytes.
 Thumbnails decode off-thread on demand; switching scenes cannot publish the
 previous scene's pending image. Press `Home` to reset the view around the scene.
 
+For a 3DGS or 2DGS task preview with recorded cameras, **View Original** uses
+the dataset owned by that run, including after a safe pause or cancellation.
+COLMAP links require the full camera image name, matching pose and an archived
+photo identified by the import manifest. Fixed-camera imports require the
+recorded dataset identity, stable view ID and unchanged copied image. The
+gallery never substitutes prepared training images, inferred video originals
+or ambiguous matches, and refreshing preview geometry does not restart the
+photo lookup. This reads only existing data; it neither edits the photos nor
+changes training or checkpoint state.
+
 Rectangle, lasso, and brush selection operate on every source vertex even when display rendering is sampled. The brush shows its exact screen-space radius, persists the chosen size, and uses the same visible-only filter and original-index edit model; GPU ID picking remains pending.
 
 Object selection keeps the source-accurate bounds only as a broad-phase check, then renders the currently resident point, Gaussian-center, or mesh primitives into a small device-pixel-aware GPU mask around the pointer. Empty volume inside a loose scan AABB therefore no longer selects the model. Selected bounds use subdued corner brackets while idle and expand to the complete dashed box only during an active transform, so the coordinate extent stays truthful without covering the viewport.

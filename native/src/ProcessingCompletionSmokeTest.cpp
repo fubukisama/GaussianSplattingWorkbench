@@ -19,9 +19,12 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QImage>
+#include <QLabel>
+#include <QListWidget>
 #include <QMessageBox>
 #include <QPointer>
 #include <QProcess>
+#include <QPushButton>
 #include <QScopeGuard>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -516,6 +519,183 @@ bool runProcessingCompletionSmokeTest(MainWindow &window) {
     QFile file(path); return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray{};
   };
   const auto readObject = [&](const QString &path) { return QJsonDocument::fromJson(readBytes(path)).object(); };
+  // The fixture owns the process boundary, not the photo widget: real worker
+  // status, a real viewport, the normal gallery button, and terminal UI actions.
+  const QString photoWorker = QString::fromLatin1(R"PY(
+import hashlib, json, pathlib, struct, sys, time
+output, backend, run, advance = sys.argv[1:]
+folder = pathlib.Path(output) / ".gsw" / "previews" / run
+folder.mkdir(parents=True)
+properties = "x y z f_dc_0 f_dc_1 f_dc_2 opacity scale_0 scale_1 scale_2 rot_0 rot_1 rot_2 rot_3".split()
+if backend == "2dgs":
+    properties.remove("scale_2")
+def emit(state, **fields):
+    print("[worker-event] " + json.dumps(dict(version=1, type="status", state=state,
+          stage="train", totalIterations=10, **fields)), flush=True)
+def publish(n):
+    header = "ply\nformat binary_little_endian 1.0\nelement vertex 4\n"
+    header += "".join("property float " + name + "\n" for name in properties) + "end_header\n"
+    body = b"".join(struct.pack("<" + "f"*len(properties), x, y, z, 0, 0, 0, 1,
+                             *([-3] * (len(properties)-11)), 1, 0, 0, 0)
+                    for x, y, z in [(0,0,0),(1,0,0),(0,1,0),(0,0,n)])
+    content = header.encode("ascii") + body
+    path = folder / ("preview_%06d.ply" % n)
+    path.write_bytes(content)
+    emit("running", iteration=n, previewIteration=n, previewPath=path.as_posix(),
+         previewKind="gaussian_live", gaussianCount=4, previewObservation=dict(
+            schema="gsw.training_observation/1", runId=run, backend=backend, datasetIdentity="",
+            trainingIdentity="a"*64, frame=dict(coordinates="training", units="u"),
+            transport="atomic_ply", generation=n, iteration=n, sourceCount=4, previewCount=4,
+            rowFloats=len(properties), sha256=hashlib.sha256(content).hexdigest(),
+            producerMonotonicNs=str(time.monotonic_ns())))
+publish(1)
+deadline = time.monotonic() + 15
+while not pathlib.Path(advance).is_file() and time.monotonic() < deadline:
+    time.sleep(.02)
+if not pathlib.Path(advance).is_file():
+    sys.exit(2)
+publish(2)
+command = sys.stdin.readline().strip()
+if command == "pause":
+    checkpoint = pathlib.Path(output) / ".gsw-resume"
+    checkpoint.mkdir()
+    name = "state-" + run + ".pth"
+    # Synthetic marker for the UI's pause state, never restored/deserialized.
+    (checkpoint / name).write_bytes(b"test-owned pause receipt (not optimizer state)")
+    (checkpoint / "ready.json").write_text(json.dumps(dict(version=1, file=name, total=10, iteration=2)))
+    emit("paused", iteration=2)
+    sys.exit(75)
+if command == "cancel":
+    emit("cancelled", iteration=2)
+    sys.exit(130)
+sys.exit(2)
+)PY");
+  {
+    QString presentedCameraSource; // outlive the window's signal connections
+    MainWindow gallery;
+    gallery.resize(1050, 730);
+    gallery.show();
+    auto *viewport = gallery.findChild<NativeViewport *>();
+    auto *panel = gallery.findChild<QAction *>(QStringLiteral("cameraPhotoListAction"));
+    auto *list = gallery.findChild<QListWidget *>(QStringLiteral("cameraPhotosList"));
+    auto *original = gallery.findChild<QPushButton *>(QStringLiteral("cameraPhotoOriginal"));
+    auto *photo = gallery.findChild<QLabel *>(QStringLiteral("cameraPhotoPixels"));
+    if (!check(viewport && panel && list && original && photo, "find actual preview gallery controls")) return false;
+    QObject::connect(viewport, &NativeViewport::cameraTrajectoryChanged, &gallery,
+        [&](qsizetype, qsizetype, bool, const QString &source, const QString &) { presentedCameraSource = source; });
+    for (const auto &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
+      for (const bool pause : {false, true}) {
+        const QString task = backend + (pause ? QStringLiteral("-pause") : QStringLiteral("-cancel"));
+        const auto manifest = root.filePath(task + QStringLiteral(".gsw.json"));
+        const QDir project(WorkspaceDocument::projectDataRootForFile(manifest));
+        const QDir dataset(project.filePath(QStringLiteral("datasets/owned")));
+        const QDir output(project.filePath(QStringLiteral("output/owned")));
+        const auto stage = output.filePath(QStringLiteral("advance"));
+        const QString originalPath = QStringLiteral("source/originals/raw/photo.png");
+        const QString poseName = QStringLiteral("capture/frame.png");
+        const QColor expected(pause ? 234 : 197, backend == QStringLiteral("2dgs") ? 65 : 30, 90);
+        const auto image = [&](const QString &path, const QColor &color) {
+          QImage pixels(64, 48, QImage::Format_RGB32); pixels.fill(color);
+          const auto absolute = dataset.filePath(path);
+          return QDir().mkpath(QFileInfo(absolute).absolutePath()) && pixels.save(absolute);
+        };
+        const auto save = [&](const QString &path, const QJsonObject &object) {
+          return write(path, QJsonDocument(object).toJson(QJsonDocument::Compact));
+        };
+        const auto raw = dataset.filePath(originalPath);
+        if (!check(image(originalPath, expected) &&
+                   image(QStringLiteral("input/") + poseName, Qt::cyan) &&
+                   image(QStringLiteral("images/") + poseName, Qt::blue) &&
+                   image(QStringLiteral("images/decoy/frame.png"), Qt::yellow) &&
+                   image(QStringLiteral("input/decoy/frame.png"), Qt::yellow) &&
+                   save(dataset.filePath(QStringLiteral("source/metadata_manifest.json")),
+                        {{"version",1},{"files",QJsonArray{QJsonObject{
+                            {"kind","image"},{"trainingPath",QStringLiteral("images/") + poseName},
+                            {"archivePath",originalPath},{"byteSize",QFileInfo(raw).size()}}}}}) &&
+                   write(dataset.filePath(QStringLiteral("sparse/0/cameras.txt")), "1 PINHOLE 64 48 50 50 32 24\n") &&
+                   write(dataset.filePath(QStringLiteral("sparse/0/images.txt")),
+                         "10 1 0 0 0 0 0 0 1 capture/frame.png\n\n"
+                         "11 1 0 0 0 -1 0 0 1 decoy/frame.png\n\n") &&
+                   write(output.filePath(QStringLiteral("cameras.json")),
+                         "[{\"img_name\":\"decoy/frame.png\",\"position\":[1,0,0],\"rotation\":[[1,0,0],[0,1,0],[0,0,1]]},"
+                         "{\"img_name\":\"capture/frame.png\",\"position\":[0,0,0],\"rotation\":[[1,0,0],[0,1,0],[0,0,1]]}]"),
+                   "write exact archive, processed-only same basename, and distinct poses")) return false;
+        const auto originalBytes = readBytes(raw);
+        WorkspaceDocument document;
+        QString error;
+        if (!check(document.create(project.absolutePath(), &error) &&
+                   document.setDatasetPath(dataset.absolutePath(), &error) && document.save(manifest, &error) &&
+                   gallery.openProjectFile(manifest), "open an isolated task dataset without a published scene")) return false;
+        GenerationExperiment record;
+        record.id = task; record.pipeline = QStringLiteral("training"); record.backend = backend;
+        record.displayName = task; record.datasetPath = dataset.absolutePath(); record.outputRoot = output.absolutePath();
+        record.resultSceneId = task; record.status = QStringLiteral("queued");
+        if (!check(GenerationHistoryStore(project.absolutePath()).upsert(record), "retain exact task scope")) return false;
+        const auto run = QUuid::createUuid().toString(QUuid::Id128);
+        gallery.mPendingTraining = MainWindow::PendingTraining{task, project.absolutePath(),
+            dataset.absolutePath(), output.absolutePath(), backend, 10, task};
+        gallery.mPendingTraining->historyId = task;
+        gallery.mPendingTraining->observation = TrainingObservationAdmission(run, backend, {}, output.absolutePath());
+        const auto supervisor = &gallery.mProcessSupervisor;
+        const auto cleanup = qScopeGuard([supervisor] { if (supervisor->isRunning()) supervisor->shutdown(); });
+        if (!check(supervisor->start(task, python, {QStringLiteral("-I"), QStringLiteral("-B"),
+                    QStringLiteral("-c"), photoWorker, output.absolutePath(), backend, run, stage},
+                    repository, {}, true) &&
+                   wait([&] { return viewport->hasProcessingPreview() && viewport->cameraCount() == 2 &&
+                                      gallery.mPauseTrainingAction->isEnabled(); }),
+                   "live worker's admitted observation and camera poses are visible")) return false;
+        if (!list->isVisible()) panel->trigger();
+        const auto select = [&] (const QString &name) {
+          const auto matches = list->findItems(name, Qt::MatchExactly);
+          if (matches.size() != 1) return false;
+          list->setCurrentItem(matches.first());
+          return true;
+        };
+        const auto contentMatches = [&] {
+          return original->isEnabled() && !photo->pixmap().isNull() &&
+              photo->pixmap().toImage().pixelColor(0,0) == expected;
+        };
+        if (!check(list->isVisible() && select(poseName), "select the exact task camera in the visible dock") ||
+            !check(wait(contentMatches), "live preview opens its verified task original before optimizer completion")) return false;
+        original->click();
+        if (!check(wait(contentMatches), "View Original displays the archived pixels, not the prepared input or training copy") ||
+            !check(select(QStringLiteral("decoy/frame.png")) && !original->isEnabled() && photo->pixmap().isNull(),
+                   "a processed-only same-basename camera remains visibly unlinked") ||
+            !check(select(poseName) && wait(contentMatches) && write(stage, "advance"),
+                   "prepare a second actual observation with the same selected camera") ||
+            !check(wait([&] { return viewport->scenePath().endsWith(QStringLiteral("/preview_000002.ply")) &&
+                                      contentMatches(); }),
+                   "new observation does not forget the selected original or require a new selection")) return false;
+        const bool associatedPause = pause && backend == QStringLiteral("2dgs");
+        if (associatedPause &&
+            !check(write(output.filePath(QStringLiteral("point_cloud/iteration_2/point_cloud.ply")),
+                         readBytes(viewport->scenePath())), "seed an independently owned paused-scene fixture")) return false;
+        if (pause) gallery.mPauseTrainingAction->trigger();
+        else gallery.mStopAction->trigger();
+        const auto terminal = pause ? QStringLiteral("paused") : QStringLiteral("cancelled");
+        if (!check(wait([&] { return !supervisor->isRunning() && !gallery.mPendingTraining &&
+                                      GenerationHistoryStore(project.absolutePath()).record(task).status == terminal; }),
+                   "normal Pause/Stop completes the owned process with the expected terminal state")) return false;
+        if (associatedPause) {
+          if (!check(wait([&] { return !viewport->displayingProcessingPreview() &&
+                                        presentedCameraSource.contains(QStringLiteral("/.gsw/checkpoints/training/")) &&
+                                        viewport->cameraCount() == 2; }) &&
+                     select(poseName) && wait(contentMatches),
+                     "the published paused checkpoint locates its own archived original")) return false;
+        } else if (!check(viewport->hasProcessingPreview() && wait(contentMatches),
+                          "the retained terminal preview keeps its task-owned original without a published model")) return false;
+        original->click();
+        if (!check(wait(contentMatches) && readBytes(raw) == originalBytes,
+                   "View Original reads but does not change the task dataset after Pause/Stop")) return false;
+        std::fprintf(stderr, "Processing completion PASS: %s live + %s original photo pixels\n",
+                     qPrintable(backend), qPrintable(terminal));
+      }
+    }
+    std::fprintf(stderr, "Processing completion: destroy the real window with its photo dock still open\n");
+    std::fflush(stderr);
+  }
+  std::fprintf(stderr, "Processing completion PASS: task photo window destroyed cleanly\n");
+  std::fflush(stderr);
   for (const QString &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
     const QString lifecycle = root.filePath(QStringLiteral("persistent-") + backend);
     const QString recoveryBase = QDir(lifecycle).filePath(QStringLiteral("recovery"));

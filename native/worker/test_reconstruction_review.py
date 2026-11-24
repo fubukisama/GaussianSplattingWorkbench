@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from native.backend.reconstruction_review import review_dataset, review_model
+from native.backend.reconstruction_review import review_dataset, review_model, review_training_originals
 
 
 def temporary_directory():
@@ -197,6 +197,66 @@ class ReconstructionReviewTests(unittest.TestCase):
             report = review_dataset(root)
             self.assertIsNone(report["originalCount"])
             self.assertEqual(report["rows"], [])
+
+    def test_task_photos_require_exact_import_archive_instead_of_a_same_name_training_copy(self):
+        with temporary_directory() as temp:
+            root = Path(temp)
+            names = fixture(root, binary=True)
+            # An old preparation step can have copied processed images to input.
+            self.assertEqual(review_training_originals(root)["rows"], [])
+            archive = root / "source/originals/preserved.png"
+            archive.parent.mkdir(parents=True)
+            archive.write_bytes(b"original archive contents, not the processed image")
+            metadata = root / "source/metadata_manifest.json"
+            correct = dict(kind="image", trainingPath="images/" + names[0],
+                           archivePath="source/originals/preserved.png", byteSize=archive.stat().st_size)
+            metadata.write_text(json.dumps(dict(version=1, files=[correct])), encoding="utf-8")
+            before = files(root)
+            report = review_training_originals(root)
+            self.assertEqual([r["name"] for r in report["rows"]], [names[0]])
+            self.assertEqual(report["rows"][0]["imagePath"], "source/originals/preserved.png")
+            self.assertEqual(report["selectedGroup"], "sparse/0")
+            self.assertEqual(files(root), before)
+            self.assertNotIn("input/" + names[0], {x["path"] for x in report["snapshots"]})
+            self.assertNotIn("images/" + names[0], {x["path"] for x in report["snapshots"]})
+            for invalid in ([correct, dict(correct, trainingPath=correct["trainingPath"].upper())],
+                            [dict(correct, archivePath="images/" + names[0])],
+                            [dict(correct, sha256="0"*64)]):
+                metadata.write_text(json.dumps(dict(version=1, files=invalid)), encoding="utf-8")
+                self.assertEqual(review_training_originals(root)["rows"], [])
+
+    def test_fixed_camera_task_uses_only_a_verified_unchanged_import_copy(self):
+        from PIL import Image
+        from native.backend.camera_dataset import load_camera_dataset, write_camera_dataset
+
+        with temporary_directory() as temp:
+            root = Path(temp)
+            (root / "train").mkdir()
+            Image.new("RGB", (12, 8), (12, 34, 56)).save(root / "train/original.png")
+            pose = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 3], [0, 0, 0, 1]]
+            (root / "transforms_train.json").write_text(json.dumps({
+                "camera_angle_x": .7, "frames": [{"file_path": "train/original", "transform_matrix": pose}]
+            }), encoding="utf-8")
+            data = load_camera_dataset(root)
+            write_camera_dataset(data, root / "camera_dataset.json")
+            identity = data["data_identity"]
+            self.assertEqual(review_training_originals(root, identity)["rows"], [])
+            view = data["views"][0]
+            record = dict(kind="image", viewId=view["view_id"], relativePath="train/original.png",
+                          trainingPath="train/original.png", sourceUnchanged=True, archiveMode="copy",
+                          byteSize=(root / "train/original.png").stat().st_size, sha256=view["sha256"])
+            (root / "source").mkdir()
+            metadata = root / "source/metadata_manifest.json"
+            metadata.write_text(json.dumps(dict(version=2, kind="fixed_camera_dataset", posePolicy="locked",
+                dataIdentity=identity, normalizationAppliedToImages=False, files=[record])), encoding="utf-8")
+            report = review_training_originals(root, identity)
+            self.assertEqual([(r["id"], r["imagePath"]) for r in report["rows"]],
+                             [(view["view_id"], "train/original.png")])
+            with self.assertRaisesRegex(ValueError, "source_changed"):
+                review_training_originals(root, "a"*64 if identity != "a"*64 else "b"*64)
+            metadata.write_text(json.dumps(dict(version=2, kind="fixed_camera_dataset", posePolicy="locked",
+                dataIdentity=identity, normalizationAppliedToImages=True, files=[record])), encoding="utf-8")
+            self.assertEqual(review_training_originals(root, identity)["rows"], [])
 
     def test_missing_prepared_image_invalidates_training_list_not_original_registration(self):
         with temporary_directory() as temp:
