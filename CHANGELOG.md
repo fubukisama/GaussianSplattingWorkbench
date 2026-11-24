@@ -20,6 +20,10 @@ in the same change, with affected capabilities, limitations and verification or
 delivery status. Implementation, verification, publication and installation remain
 separate claims.
 
+## 2026-11-24
+
+- **Fixed: Project tree selection.** After the last model is unloaded, clicking a project row no longer selects the entire tree. Clicking blank space clears the selection; Ctrl+A selects only model rows. Model files are not changed. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/516af6cee79879f61b91b3f422453636bbdd2df2)
+
 ## 2026-11-23
 
 - **Camera display and real photos.** The viewport displays compact oriented blue
