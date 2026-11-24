@@ -407,6 +407,10 @@ int main(int argc, char *argv[]) {
       QStringLiteral("smoke-test-multi-scene"),
       QStringLiteral("Verify multi-object import, rendering, selection and persistence."));
   parser.addOption(multiSceneSmokeTestOption);
+  QCommandLineOption projectTreeSelectionSmokeTestOption(
+      QStringLiteral("smoke-test-project-tree-selection"),
+      QStringLiteral("Verify Project tree selection after unloading all models."));
+  parser.addOption(projectTreeSelectionSmokeTestOption);
   QCommandLineOption sceneVisibilitySmokeTestOption(
       QStringLiteral("smoke-test-scene-visibility"),
       QStringLiteral("Verify per-object display controls across point, mesh, 3DGS and 2DGS scenes."));
@@ -618,6 +622,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(windowMinimizeSmokeOption) ||
                          parser.isSet(languageSmokeOption) || parser.isSet(languageFormMatrixOption) ||
                          parser.isSet(multiSceneSmokeTestOption) ||
+                         parser.isSet(projectTreeSelectionSmokeTestOption) ||
                          parser.isSet(sceneVisibilitySmokeTestOption) ||
                          parser.isSet(viewportSchedulingSmokeTestOption) ||
                          importDialogSmokeTest || displayLayoutSmokeTest ||
@@ -952,6 +957,11 @@ int main(int argc, char *argv[]) {
   } else if (parser.isSet(multiSceneSmokeTestOption)) {
     QTimer::singleShot(650, &application, [&] {
       smokeTestCompleted = gsw::runMultiSceneSmokeTest(window);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(projectTreeSelectionSmokeTestOption)) {
+    QTimer::singleShot(650, &application, [&] {
+      smokeTestCompleted = gsw::runProjectTreeSelectionSmokeTest(window);
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   } else if (parser.isSet(viewportSchedulingSmokeTestOption)) {

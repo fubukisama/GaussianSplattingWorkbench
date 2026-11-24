@@ -105,6 +105,15 @@ jobs:
         run: |
           ./scripts/setup_native_ci_display.ps1
           ./scripts/setup_native_ci_graphics.ps1
+      - name: Verify Project tree selection after unloading models
+        shell: pwsh
+        env:
+          GSW_SMOKE_OUTPUT_DIR: ${{ github.workspace }}/native/acceptance-artifact
+        run: |
+          ctest --test-dir native/build-acceptance -C Release --no-tests=error --output-on-failure --verbose `
+            --output-log native/project-tree-selection.log `
+            -R '^native_project_tree_selection$'
+          if ($LASTEXITCODE -ne 0) { throw "Project tree selection regression failed." }
       - name: Verify reconstruction review and source-camera navigation
         shell: pwsh
         run: |
@@ -148,6 +157,7 @@ jobs:
           path: |
             native/acceptance.log
             native/acceptance-path-presets.log
+            native/project-tree-selection.log
             native/reconstruction-review.log
             native/build-acceptance/reconstruction-review-evidence/
             native/acceptance-artifact/

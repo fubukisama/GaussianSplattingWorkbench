@@ -168,6 +168,16 @@ class SceneTreeWidget final : public QTreeWidget {
 public:
   using QTreeWidget::QTreeWidget;
   std::function<void()> toggleSelectedVisibility;
+  void selectAll() override {
+    QItemSelection models;
+    for (QTreeWidgetItemIterator it(this); *it; ++it) {
+      const auto *item = *it;
+      if (item->isHidden() || item->data(0, Qt::UserRole + 2).toString().isEmpty()) continue;
+      const auto index = indexFromItem(item, 0);
+      models.select(index, index);
+    }
+    selectionModel()->select(models, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+  }
 protected:
   void keyPressEvent(QKeyEvent *event) override {
     if (event->key() == Qt::Key_Space && event->modifiers() == Qt::NoModifier && toggleSelectedVisibility) {
@@ -2497,6 +2507,12 @@ void MainWindow::createProjectDock() {
   connect(mProjectTree, &QTreeWidget::itemSelectionChanged, this, [this]() {
     const QList<QTreeWidgetItem *> selection = mProjectTree->selectedItems();
     if (mProcessSupervisor.isRunning() || mSelectionBusy) { syncProjectTreeSelection(); return; }
+    // With no document models, this is ordinary navigation among project
+    // rows, not a model selection the viewport can apply or restore.
+    if (mWorkspace.sceneObjects().isEmpty()) {
+      updateSceneVisibilityActions();
+      return;
+    }
     QStringList ids;
     for (const auto *item : selection) {
       const QString id = item->data(0, Qt::UserRole + 2).toString();
@@ -2515,11 +2531,12 @@ void MainWindow::createProjectDock() {
       QScopedValueRollback<bool> restoreTree(mPreserveProjectTree, false);
       QScopedValueRollback<bool> restoreRows(mPreserveSceneTreeSelection, false);
       syncProjectTreeSelection();
-      if (mViewport->selectedSceneIds().isEmpty() &&
-          !mViewport->sceneObjectVisible(mViewport->activeSceneId())) {
+      const QString activeId = mViewport->activeSceneId();
+      if (!activeId.isEmpty() && mViewport->selectedSceneIds().isEmpty() &&
+          !mViewport->sceneObjectVisible(activeId)) {
         const QSignalBlocker blocker(mProjectTree);
         for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it)
-          if ((*it)->data(0, Qt::UserRole + 2).toString() == mViewport->activeSceneId())
+          if ((*it)->data(0, Qt::UserRole + 2).toString() == activeId)
             (*it)->setSelected(true);
       }
       updateSceneVisibilityActions();
@@ -8122,11 +8139,12 @@ void MainWindow::syncProjectTreeSelection() {
   if (!mProjectTree || !mViewport || mPreserveSceneTreeSelection) return;
   const QSignalBlocker blocker(mProjectTree);
   const QStringList ids = mViewport->selectedSceneIds();
+  const QString activeId = mViewport->activeSceneId();
   for (QTreeWidgetItemIterator it(mProjectTree); *it; ++it) {
     auto *item = *it;
     const QString id = item->data(0, Qt::UserRole + 2).toString();
     item->setSelected(!id.isEmpty() && ids.contains(id));
-    if (!mPreserveProjectTree && id == mViewport->activeSceneId()) {
+    if (!mPreserveProjectTree && !activeId.isEmpty() && id == activeId) {
       mProjectTree->setCurrentItem(item, 0, QItemSelectionModel::NoUpdate);
     }
   }

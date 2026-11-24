@@ -519,4 +519,114 @@ bool runMultiSceneSmokeTest(MainWindow &window) {
   qInfo() << "MULTI_SCENE PASS: append, same-frame rendering, Ctrl/Shift multiselection, shared-pivot group transforms, atomic cancel/undo/redo, unselected isolation, save/reopen, async replacement, mixed point/Gaussian layers with large XYZ";
   return true;
 }
+
+bool runProjectTreeSelectionSmokeTest(MainWindow &window) {
+  auto *tree = window.findChild<QTreeWidget *>(QStringLiteral("projectTree"));
+  auto *viewport = qobject_cast<NativeViewport *>(window.centralWidget());
+  auto *document = window.findChild<WorkspaceDocument *>();
+  auto *unload = window.findChild<QAction *>(QStringLiteral("clearSceneAction"));
+  QTemporaryDir directory;
+  const auto check = [](bool ok, const char *message) {
+    if (!ok) qCritical() << "PROJECT_TREE_SELECTION FAIL:" << message;
+    return ok;
+  };
+  if (!check(tree && tree->isVisible() && viewport && document && unload && directory.isValid(),
+             "real Project tree, workspace and unload action available")) return false;
+
+  const QByteArray ply("ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\n"
+                       "property float y\nproperty float z\nend_header\n"
+                       "0 0 0\n1 0 0\n0 1 0\n0 0 1\n");
+  QString error;
+  if (!check(document->createUntitled(directory.path(), QStringLiteral("Tree selection smoke"), &error),
+             "isolated workspace opened")) return false;
+  QStringList names;
+  for (const QString &name : {QStringLiteral("tree-a.ply"), QStringLiteral("tree-b.ply")}) {
+    QFile file(QDir(directory.path()).filePath(name));
+    if (!check(file.open(QIODevice::WriteOnly) && file.write(ply) == ply.size(),
+               "write owned point fixture")) return false;
+    file.close();
+    if (!check(document->addScenePath(file.fileName(), &error), "import owned point fixture")) return false;
+    names.append(file.fileName());
+  }
+  const auto itemPoint = [tree](QTreeWidgetItem *item) {
+    return tree->visualRect(tree->indexFromItem(item)).center();
+  };
+  const auto click = [tree](const QPoint &point, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+    QMouseEvent down(QEvent::MouseButtonPress, point, tree->viewport()->mapToGlobal(point),
+                     Qt::LeftButton, Qt::LeftButton, modifiers);
+    QMouseEvent up(QEvent::MouseButtonRelease, point, tree->viewport()->mapToGlobal(point),
+                   Qt::LeftButton, Qt::NoButton, modifiers);
+    QApplication::sendEvent(tree->viewport(), &down);
+    QApplication::sendEvent(tree->viewport(), &up);
+  };
+  const auto selectAll = [tree] {
+    QKeyEvent event(QEvent::KeyPress, Qt::Key_A, Qt::ControlModifier, QStringLiteral("a"));
+    QApplication::sendEvent(tree, &event);
+  };
+
+  tree->expandAll();
+  QCoreApplication::processEvents();
+  const auto rows = tree->findItems(QStringLiteral("tree-a.ply"), Qt::MatchExactly | Qt::MatchRecursive);
+  const auto next = tree->findItems(QStringLiteral("tree-b.ply"), Qt::MatchExactly | Qt::MatchRecursive);
+  if (!check(rows.size() == 1 && next.size() == 1 &&
+             tree->itemAt(itemPoint(rows.first())) == rows.first() &&
+             tree->itemAt(itemPoint(next.first())) == next.first(),
+             "both model rows are actionable in the actual tree")) return false;
+  click(itemPoint(rows.first()));
+  click(itemPoint(next.first()), Qt::ShiftModifier);
+  if (!check(tree->selectedItems().size() == 2 && viewport->selectedSceneIds().size() == 2,
+             "Shift selects both models")) return false;
+  click(itemPoint(next.first()), Qt::ControlModifier);
+  if (!check(tree->selectedItems() == rows && viewport->selectedSceneIds().size() == 1,
+             "Ctrl removes only the clicked model")) return false;
+  selectAll();
+  if (!check(tree->selectedItems().size() == 2 && viewport->selectedSceneIds().size() == 2 &&
+             unload->isEnabled(), "Ctrl+A selects just the two models")) return false;
+
+  bool confirmed = false;
+  QTimer confirmation;
+  confirmation.setSingleShot(true);
+  QObject::connect(&confirmation, &QTimer::timeout, &window, [&] {
+    if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+        box && box->button(QMessageBox::Yes)) {
+      confirmed = true;
+      box->button(QMessageBox::Yes)->click();
+    }
+  });
+  confirmation.start(0);
+  unload->trigger();
+  if (!check(confirmed && document->sceneObjects().isEmpty() && viewport->sceneObjectCount() == 0,
+             "actual unload action removes the last two models")) return false;
+  for (const auto &path : names) {
+    QFile file(path);
+    if (!check(file.open(QIODevice::ReadOnly) && file.readAll() == ply, "unload preserves source bytes"))
+      return false;
+  }
+
+  tree->expandAll();
+  QCoreApplication::processEvents();
+  auto *root = tree->topLevelItem(0);
+  if (!check(root && tree->itemAt(itemPoint(root)) == root, "empty project's root row can be clicked")) return false;
+  click(itemPoint(root));
+  qInfo() << "PROJECT_TREE_SELECTION selected rows after unloading and clicking:" << tree->selectedItems().size();
+  const QString capture = qEnvironmentVariable("GSW_SMOKE_OUTPUT_DIR");
+  if (!capture.isEmpty() &&
+      !check(QDir().mkpath(capture) &&
+                 tree->grab().save(QDir(capture).filePath(QStringLiteral("project-tree-after-unload.png"))),
+             "record Project tree after unloading and clicking")) return false;
+  if (!check(tree->selectedItems() == QList<QTreeWidgetItem *>{root} && viewport->selectedSceneIds().isEmpty(),
+             "empty scene single-click selects only the clicked row")) return false;
+  const QPoint blank(tree->viewport()->rect().center().x(), tree->viewport()->rect().bottom() - 2);
+  if (!check(!tree->indexAt(blank).isValid(), "click point lies in real empty tree space")) return false;
+  click(blank);
+  if (!check(tree->selectedItems().isEmpty(), "empty-area click cancels selection")) return false;
+  if (!capture.isEmpty() &&
+      !check(tree->grab().save(QDir(capture).filePath(QStringLiteral("project-tree-deselected.png"))),
+             "record Project tree after deselection")) return false;
+  selectAll();
+  if (!check(tree->selectedItems().isEmpty(), "Ctrl+A cannot select placeholders when no models exist"))
+    return false;
+  qInfo() << "PROJECT_TREE_SELECTION PASS: unloaded models, one selected row, blank-area deselection and model-only Ctrl+A";
+  return true;
+}
 }

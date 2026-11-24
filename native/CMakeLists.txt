@@ -1429,6 +1429,12 @@ if(BUILD_TESTING)
     ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
   )
+  add_test(NAME native_project_tree_selection
+    COMMAND GaussianSceneWorkbench --smoke-test-project-tree-selection --language zh_CN --theme light)
+  set_tests_properties(native_project_tree_selection PROPERTIES
+    TIMEOUT 25
+    ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH="
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   foreach(GSW_VISIBILITY_LANGUAGE zh_CN en_US ja_JP)
     foreach(GSW_VISIBILITY_THEME light dark)
       add_test(NAME native_scene_visibility_${GSW_VISIBILITY_LANGUAGE}_${GSW_VISIBILITY_THEME}
