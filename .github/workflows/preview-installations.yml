@@ -1,6 +1,11 @@
 name: Installed GitHub preview acceptance
 on:
   workflow_call:
+    inputs:
+      preview_id: {type: string, required: true}
+      preview_digest: {type: string, required: true}
+      setup_id: {type: string, required: true}
+      setup_digest: {type: string, required: true}
 permissions:
   contents: read
   actions: read
@@ -19,16 +24,30 @@ jobs:
           version: '6.8.3'
           arch: win64_msvc2022_64
           cache: true
-      - uses: actions/download-artifact@v8
-        with:
-          name: Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64
-          path: D:/gsw-preview-qa/payload
-          digest-mismatch: error
-      - uses: actions/download-artifact@v8
-        with:
-          name: Gaussian-Scene-Workbench-windows-x64-setup
-          path: D:/gsw-preview-qa/setup
-          digest-mismatch: error
+      - name: Download the tested portable artifact by immutable ID
+        shell: pwsh
+        timeout-minutes: 6
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GSW_ARTIFACT_ID: ${{ inputs.preview_id }}
+          GSW_ARTIFACT_DIGEST: ${{ inputs.preview_digest }}
+          GSW_ARTIFACT_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python -I -B scripts/read_github_actions_artifact.py `
+            --name Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64 --output D:/gsw-preview-qa/payload
+          exit $LASTEXITCODE
+      - name: Download the tested Setup artifact by immutable ID
+        shell: pwsh
+        timeout-minutes: 6
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GSW_ARTIFACT_ID: ${{ inputs.setup_id }}
+          GSW_ARTIFACT_DIGEST: ${{ inputs.setup_digest }}
+          GSW_ARTIFACT_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python -I -B scripts/read_github_actions_artifact.py `
+            --name Gaussian-Scene-Workbench-windows-x64-setup --output D:/gsw-preview-qa/setup
+          exit $LASTEXITCODE
       - name: Build earlier source-bound transport for the controlled issuer only
         shell: pwsh
         run: |

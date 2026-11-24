@@ -12,6 +12,7 @@ on:
       - "packaging/windows/**"
       - "docs/LOCALIZATION.md"
       - ".github/workflows/native-windows.yml"
+      - ".github/workflows/preview-installations.yml"
       - "docs/NATIVE_CI.md"
       - "docs/NATIVE_MIGRATION.md"
       - "docs/NATIVE_PARITY.md"
@@ -29,6 +30,7 @@ on:
       - "packaging/windows/**"
       - "docs/LOCALIZATION.md"
       - ".github/workflows/native-windows.yml"
+      - ".github/workflows/preview-installations.yml"
       - "docs/NATIVE_CI.md"
       - "docs/NATIVE_MIGRATION.md"
       - "docs/NATIVE_PARITY.md"
@@ -270,6 +272,11 @@ jobs:
     permissions:
       contents: read
       actions: read
+    outputs:
+      preview_id: ${{ steps.native-preview-upload.outputs.artifact-id }}
+      preview_digest: ${{ steps.native-preview-upload.outputs.artifact-digest }}
+      setup_id: ${{ steps.native-setup-upload.outputs.artifact-id }}
+      setup_digest: ${{ steps.native-setup-upload.outputs.artifact-digest }}
 
     steps:
       - name: Checkout source
@@ -613,6 +620,7 @@ jobs:
           ./scripts/test_windows_installer_ui.ps1 -SetupPath $testSetup -TestRoot "$PWD/native/setup-validation"
 
       - name: Upload Windows setup installer
+        id: native-setup-upload
         uses: actions/upload-artifact@v7
         with:
           name: Gaussian-Scene-Workbench-windows-x64-setup
@@ -657,11 +665,18 @@ jobs:
           retention-days: 30
 
       - name: Download the published preview artifact for independent readback
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ steps.native-preview-upload.outputs.artifact-id }}
-          path: ${{ runner.temp }}/gsw-native-artifact-downloaded
-          digest-mismatch: error
+        shell: pwsh
+        timeout-minutes: 6
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GSW_ARTIFACT_ID: ${{ steps.native-preview-upload.outputs.artifact-id }}
+          GSW_ARTIFACT_DIGEST: ${{ steps.native-preview-upload.outputs.artifact-digest }}
+          GSW_ARTIFACT_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          & '${{ steps.qa-python.outputs.python-path }}' -I -B scripts/read_github_actions_artifact.py `
+            --name Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64 `
+            --output "$env:RUNNER_TEMP/gsw-native-artifact-downloaded"
+          exit $LASTEXITCODE
 
       - name: Verify actual downloaded package and corresponding source bytes
         shell: pwsh
@@ -716,3 +731,8 @@ jobs:
       contents: read
       actions: read
     uses: ./.github/workflows/preview-installations.yml
+    with:
+      preview_id: ${{ needs.build.outputs.preview_id }}
+      preview_digest: ${{ needs.build.outputs.preview_digest }}
+      setup_id: ${{ needs.build.outputs.setup_id }}
+      setup_digest: ${{ needs.build.outputs.setup_digest }}

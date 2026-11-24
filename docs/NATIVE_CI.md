@@ -1,5 +1,27 @@
 # Native CI and security detection / 原生持续集成与安全检测 / ネイティブ CI とセキュリティ検出
 
+## GitHub artifact readback / GitHub 产物回读 / GitHub 成果物の読戻し
+
+The Windows preview, Setup and hidden-source fixture gates read back the
+published ZIP by the immutable ID from that upload. The prior action could
+omit a finalized artifact from its same-run list. Exact-ID REST readback
+waits at most 60 seconds for readiness, binds the run and upload digest to
+the REST metadata, and checks the downloaded length and SHA-256 before
+extraction. The token is never sent to the storage redirect. The original
+file-by-file, hidden-source and installed-entry checks remain required; a
+missing, expired or mismatched package is not accepted.
+
+中文：Windows 预览包、Setup 与隐藏源码夹具按上传返回的不可变 ID 回读。此前的
+同一轮产物列表可能暂未包含刚上传的包。新流程最多等 60 秒，核对运行、上传摘要及
+REST 元数据，再确认 ZIP 长度和 SHA-256 后解包，不将 API 令牌传给存储地址。
+逐文件、隐藏源码与安装入口检查不变；缺失、过期或不匹配的包不会通过。
+
+日本語：Windows プレビュー・Setup・隠しソースの検査は、アップロード時の不変 ID
+で成果物を読戻します。直前の成果物が同一 run の一覧に出ない場合を避け、準備を最大
+60 秒待ちます。run とアップロード時のダイジェストを REST メタデータと照合し、ZIP の
+サイズ・SHA-256 を検証してから展開します。ストレージに API トークンは渡しません。
+ファイル単位・隠しソース・インストール入口の検査は維持し、欠落・期限切れ・不一致を拒否します。
+
 ## Native language resource diagnosis
 
 `Native Language Resources` is an additional manual Windows lane, not a

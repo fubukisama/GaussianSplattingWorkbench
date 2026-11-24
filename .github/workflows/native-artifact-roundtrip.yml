@@ -8,11 +8,13 @@ on:
       - '.github/workflows/native-artifact-roundtrip.yml'
       - '.github/workflows/native-windows.yml'
       - 'scripts/verify_native_artifact.py'
+      - 'scripts/read_github_actions_artifact.py'
       - 'scripts/prepare_native_artifact_fixture.py'
       - 'scripts/test_native_artifact.py'
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   hidden-source-roundtrip:
@@ -45,11 +47,33 @@ jobs:
           path: ${{ runner.temp }}/gsw-artifact-roundtrip/expected/
           if-no-files-found: error
           retention-days: 7
-      - uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ steps.filtered.outputs.artifact-id }}
-          path: ${{ runner.temp }}/gsw-artifact-roundtrip/filtered
-          digest-mismatch: error
+      - name: Require an upload-digest mismatch to be rejected before extraction
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GSW_ARTIFACT_ID: ${{ steps.filtered.outputs.artifact-id }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference=$false
+          $env:GSW_ARTIFACT_DIGEST='0'*64
+          $destination="$env:GSW_ARTIFACT_ROUNDTRIP/wrong-digest"
+          $result=(& '${{ steps.qa.outputs.python-path }}' -I -B scripts/read_github_actions_artifact.py `
+            --name native-artifact-filtered-negative-control --output $destination | Out-String)
+          $code=$LASTEXITCODE
+          $result | Write-Output
+          if($code -ne 2 -or $result -notmatch 'artifact_digest_mismatch' -or (Test-Path -LiteralPath $destination)){
+            throw 'A mismatched upload digest must not produce extracted output.'
+          }
+          exit 0
+      - name: Read back the actual filtered artifact by immutable ID
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GSW_ARTIFACT_ID: ${{ steps.filtered.outputs.artifact-id }}
+          GSW_ARTIFACT_DIGEST: ${{ steps.filtered.outputs.artifact-digest }}
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/read_github_actions_artifact.py `
+            --name native-artifact-filtered-negative-control --output "$env:GSW_ARTIFACT_ROUNDTRIP/filtered"
+          exit $LASTEXITCODE
       - name: Require the real filtered artifact to be rejected
         shell: pwsh
         run: |
@@ -75,11 +99,16 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-      - uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ steps.complete.outputs.artifact-id }}
-          path: ${{ runner.temp }}/gsw-artifact-roundtrip/downloaded
-          digest-mismatch: error
+      - name: Read back the actual complete artifact by immutable ID
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GSW_ARTIFACT_ID: ${{ steps.complete.outputs.artifact-id }}
+          GSW_ARTIFACT_DIGEST: ${{ steps.complete.outputs.artifact-digest }}
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/read_github_actions_artifact.py `
+            --name native-artifact-complete-roundtrip-fixture --output "$env:GSW_ARTIFACT_ROUNDTRIP/downloaded"
+          exit $LASTEXITCODE
       - name: Verify actual downloaded bytes and both manifests
         shell: pwsh
         run: |
