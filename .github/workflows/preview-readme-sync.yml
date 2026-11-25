@@ -1,0 +1,119 @@
+name: Sync accepted preview README downloads
+
+on:
+  workflow_run:
+    workflows: [Public preview live readback]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      readback_run:
+        description: Existing successful public Windows readback run ID (read-only rehearsal)
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  verify:
+    if: >-
+      github.repository_id == '1286130219' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+        (github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.event == 'workflow_dispatch' &&
+         github.event.workflow_run.head_repository.id == 1286130219))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      tag: ${{ steps.readback.outputs.tag }}
+      source: ${{ steps.readback.outputs.source }}
+    steps:
+      # Only run code from main, never the upstream checkout or its artifacts.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Test the public acceptance and four-document sync contract
+        run: python -B .github/scripts/test_sync_preview_readmes.py
+      - name: Verify the exact accepted run and anonymous immutable release
+        id: readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          READBACK_RUN: ${{ github.event.workflow_run.id || inputs.readback_run }}
+          READBACK_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        shell: bash
+        run: |
+          args=(verify --run "$READBACK_RUN" --github-output "$GITHUB_OUTPUT")
+          if [[ -n "$READBACK_ATTEMPT" ]]; then
+            args+=(--attempt "$READBACK_ATTEMPT")
+          fi
+          python -I -B .github/scripts/sync_preview_readmes.py "${args[@]}"
+      - name: Rehearse the link sync without pushing
+        if: github.event_name == 'workflow_dispatch' && steps.readback.outputs.tag != ''
+        env:
+          PREVIEW_TAG: ${{ steps.readback.outputs.tag }}
+          PREVIEW_SOURCE: ${{ steps.readback.outputs.source }}
+        run: |
+          python -I -B .github/scripts/sync_preview_readmes.py stage --tag "$PREVIEW_TAG" --source "$PREVIEW_SOURCE"
+          git diff --check
+          python -I -B .github/scripts/check_public_docs.py
+          python -I -B scripts/check_native_branding.py
+
+  sync:
+    needs: verify
+    if: github.event_name == 'workflow_run' && needs.verify.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/heads/main
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Validate and push only the four download documents
+        env:
+          PREVIEW_TAG: ${{ needs.verify.outputs.tag }}
+          PREVIEW_SOURCE: ${{ needs.verify.outputs.source }}
+          READBACK_RUN: ${{ github.event.workflow_run.id }}
+          GIT_TERMINAL_PROMPT: '0'
+        shell: bash
+        run: |
+          scope=(README.md README.zh-CN.md README.ja.md README_RELEASE.md)
+          for attempt in 1 2 3; do
+            base=$(git rev-parse HEAD)
+            python -I -B .github/scripts/sync_preview_readmes.py stage --tag "$PREVIEW_TAG" --source "$PREVIEW_SOURCE"
+            if git diff --quiet; then
+              exit 0
+            fi
+            git diff --check
+            python -I -B .github/scripts/check_public_docs.py
+            python -I -B scripts/check_native_branding.py
+            git add -- "${scope[@]}"
+            # The renderer either updates all four documents or none.
+            if [[ $(git diff --cached --name-only | wc -l) -ne 4 ]]; then
+              echo "Unexpected documentation commit scope."
+              exit 1
+            fi
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                commit -m "docs: point downloads at $PREVIEW_TAG [skip ci]" \
+                       -m "Product source: $PREVIEW_SOURCE; public Windows readback: $READBACK_RUN"
+            if git push origin HEAD:refs/heads/main; then
+              exit 0
+            fi
+            git fetch --no-tags origin refs/heads/main
+            if [[ $(git rev-parse FETCH_HEAD) == "$base" ]]; then
+              echo "Main did not advance; check repository write policy. Existing links were kept."
+              exit 1
+            fi
+            git switch --detach FETCH_HEAD
+          done
+          echo "Main moved repeatedly; existing links were kept. Rerun this sync without rerunning Windows."
+          exit 1

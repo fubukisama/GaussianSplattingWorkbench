@@ -10,6 +10,14 @@
 
 The preview trusts control of the pinned GitHub repository over HTTPS. A digest supplied by that service detects corruption; it is not independent publisher authentication. Windows Authenticode is not required for this preview lane. The signed protocol-2 updater never falls back to the GitHub adapter. Only immutable, non-draft prereleases tagged `vX.Y.Z-native-preview.YYYYMMDD.N` with compatible Setup, managed ZIP and `gsw-windows-x64-preview.json` are eligible. The starter ZIP and its separate SHA-256 file are for first use, not the applied update payload. Increment `native/github-preview-update/sequence.txt` (YYYYMMDD plus a two-digit counter) before building each new release. The release builder stages these assets; a CI artifact is not a public release.
 
+### Keeping the public download links current / 下载链接同步 / ダウンロードリンクの同期
+
+**简体中文**：公开发布预览版后，完成 **Public preview live readback** 的 `released` 验收。通过后，**Sync accepted preview README downloads** 会核对公开发布标签、首装 ZIP 和 `SHA256SUMS`，自动提交三语 README 和共用安装指南的同一组链接。草稿、仅 CDN 检查、验收失败或比当前入口更旧的版本都不会替换链接。可用已有通过的验收运行 ID 手动启动同步工作流做只读演练；演练不会推送。
+
+**English:** After publishing a preview, complete **Public preview live readback** in `released` mode. **Sync accepted preview README downloads** then verifies the public tag, starter ZIP and `SHA256SUMS` and commits the same links to all three READMEs and the shared guide. Drafts, CDN-only checks, failed acceptance and older releases cannot replace the current links. Manually dispatching the sync with an existing successful readback run ID rehearses the update without pushing.
+
+**日本語**：プレビューの公開後に **Public preview live readback** の `released` モードで受け入れ確認を完了します。確認が通ると **Sync accepted preview README downloads** が公開タグ、初回導入用 ZIP、`SHA256SUMS` を照合し、3 言語の README と共通導入ガイドのリンクをまとめて更新します。下書き、CDN のみの確認、不合格、現在より古い版ではリンクを変更しません。合格済みの実行 ID を指定して手動で同期を起動すると、プッシュなしで確認できます。
+
 ## 简体中文
 
 桌面、开始菜单、任务栏统一使用固定的原生启动器。已验证的新版本放入独立的
