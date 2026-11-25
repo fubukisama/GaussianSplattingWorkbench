@@ -1,0 +1,166 @@
+name: Native Camera Photo Runtimes
+
+# Quick worker-contract check, not a substitute for the Windows product build.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/backend/reconstruction_review.py'
+      - 'native/worker/reconstruction_review.py'
+      - 'native/worker/test_reconstruction_review.py'
+      - '.github/workflows/native-camera-photo-runtimes.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        required: true
+        options: [witness, candidate]
+      source:
+        description: Exact unreferenced source commit, directly on top of the dispatch commit
+        type: string
+        required: true
+      tree:
+        description: Expected complete tree for the source commit
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Photo worker on Windows / Python ${{ matrix.version }}
+    if: github.repository_id == '1286130219' && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_dispatch' || github.actor_id == github.repository_owner_id)
+    timeout-minutes: 8
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(inputs.mode == 'witness' && '["3.8.10"]' || '["3.8.10","3.10.11","3.12.10"]') }}
+    env:
+      PYTHONUTF8: "1"
+      MODE: ${{ inputs.mode || 'candidate' }}
+      SOURCE: ${{ inputs.source || github.sha }}
+      TREE: ${{ inputs.tree }}
+      RUNTIME: ${{ matrix.version }}
+    steps:
+      - name: Admit the exact detached source before checkout
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows' -or
+              $env:SOURCE -cnotmatch '^[0-9a-f]{40}$' -or $env:TREE -cnotmatch '^[0-9a-f]{40}$') {
+            throw 'Invalid hosted source identity'
+          }
+          $repo = "repos/$env:GITHUB_REPOSITORY"
+          $commit = gh api "$repo/git/commits/$env:SOURCE" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $commit.sha -cne $env:SOURCE -or $commit.tree.sha -cne $env:TREE -or
+              @($commit.parents).Count -ne 1 -or $commit.parents[0].sha -cne $env:GITHUB_SHA) {
+            throw 'Detached source must be the exact direct child of the dispatch commit'
+          }
+          $compare = gh api "$repo/compare/$env:GITHUB_SHA...$env:SOURCE" | ConvertFrom-Json
+          $allowed = @('native/worker/test_reconstruction_review.py')
+          if ($env:MODE -ceq 'candidate') {
+            $allowed += @('native/backend/reconstruction_review.py', 'CHANGELOG.md', 'CHANGELOG.zh-CN.md', 'CHANGELOG.ja.md')
+          }
+          if ($LASTEXITCODE -ne 0 -or $compare.status -cne 'ahead' -or $compare.total_commits -ne 1 -or
+              @($compare.files | Where-Object status -cne 'modified').Count -or
+              (($compare.files.filename | Sort-Object) -join '|') -cne (($allowed | Sort-Object) -join '|')) {
+            throw 'Detached original-photo source contains unexpected changes'
+          }
+          "EXPECTED_PATHS=$($allowed -join '|')" >> $env:GITHUB_ENV
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Verify checked-out source and prepare evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $head = (git rev-parse HEAD).Trim()
+          $tree = (git rev-parse 'HEAD^{tree}').Trim()
+          if ($head -cne $env:SOURCE -or @(git status --porcelain).Count) { throw 'Checkout drift' }
+          if ($env:GITHUB_EVENT_NAME -ceq 'workflow_dispatch') {
+            $actual = @(git diff-tree --no-commit-id --name-only -r HEAD)
+            if ($tree -cne $env:TREE -or (git rev-parse HEAD^).Trim() -cne $env:GITHUB_SHA -or
+                (($actual | Sort-Object) -join '|') -cne (($env:EXPECTED_PATHS.Split('|') | Sort-Object) -join '|')) {
+              throw 'Detached checkout differs from the admitted tree'
+            }
+            foreach ($path in $actual) {
+              if ((git ls-tree HEAD -- $path) -cnotmatch '^100644 blob [0-9a-f]{40}\s') {
+                throw "Refusing a nonregular source file: $path"
+              }
+            }
+          }
+          $base = if (Test-Path -LiteralPath 'D:/') { 'D:/' } else { $env:RUNNER_TEMP }
+          $qa = Join-Path $base "gsw-photo-compat-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:RUNTIME"
+          if (Test-Path -LiteralPath $qa) { throw 'Fixture root already exists' }
+          New-Item -ItemType Directory -Path "$qa/evidence","$qa/temp" | Out-Null
+          "PHOTO_QA=$qa" >> $env:GITHUB_ENV
+          "GSW_RECONSTRUCTION_REVIEW_ROOT=$qa/fixtures" >> $env:GITHUB_ENV
+          "TEMP=$qa/temp" >> $env:GITHUB_ENV
+          "TMP=$qa/temp" >> $env:GITHUB_ENV
+          [ordered]@{ sourceCommit=$head; sourceTree=$tree; workflowCommit=$env:GITHUB_WORKFLOW_SHA;
+            run=$env:GITHUB_RUN_ID; attempt=$env:GITHUB_RUN_ATTEMPT; expectedPython=$env:RUNTIME; mode=$env:MODE } |
+              ConvertTo-Json | Set-Content -LiteralPath "$qa/evidence/source.json" -Encoding utf8
+
+      - uses: actions/setup-python@v6
+        id: python
+        with:
+          python-version: ${{ matrix.version }}
+          architecture: x64
+
+      - name: Run the real original-photo worker under this interpreter
+        shell: pwsh
+        env:
+          QA_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          & $env:QA_PYTHON -B -m venv "$env:PHOTO_QA/venv"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot create isolated photo QA environment' }
+          $python = "$env:PHOTO_QA/venv/Scripts/python.exe"
+          $version = & $python -B -c 'import platform; print(platform.python_version())'
+          if ($LASTEXITCODE -ne 0 -or $version -cne $env:RUNTIME) { throw 'Wrong photo-worker interpreter' }
+          $out = "$env:PHOTO_QA/evidence"
+          & $python --version | Set-Content -LiteralPath "$out/python.txt" -Encoding utf8
+          $numpy = if ($version.StartsWith('3.8.')) { '1.24.4' } else { '1.26.4' }
+          & $python -B -m pip install --disable-pip-version-check --no-cache-dir '--only-binary=:all:' "numpy==$numpy" 'Pillow==10.4.0'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot install isolated photo QA dependencies' }
+          $tests = 'native.worker.test_reconstruction_review'
+          if ($env:MODE -ceq 'witness') {
+            $tests += '.ReconstructionReviewTests.test_task_originals_command_reads_archived_photo_in_active_runtime'
+          }
+          & $python -B -m unittest -v $tests 2>&1 | Tee-Object -FilePath "$out/tests.log"
+          $code = $LASTEXITCODE
+          $log = Get-Content -Raw -LiteralPath "$out/tests.log"
+          if ($env:MODE -ceq 'witness') {
+            if ($code -ne 1 -or $log -cnotmatch 'Ran 1 test' -or $log -cnotmatch 'FAILED \(failures=1\)' -or
+                !$log.Contains("WindowsPath' object has no attribute 'is_relative_to'")) {
+              throw 'Expected real Python 3.8 worker failure was not isolated'
+            }
+            'REPRODUCED_RED (shipped original-photo command on Python 3.8)' |
+              Set-Content -LiteralPath "$out/outcome.txt" -Encoding utf8
+          } else {
+            if ($code -ne 0 -or $log -cnotmatch 'test_task_originals_command_reads_archived_photo_in_active_runtime.*\.\.\. ok' -or
+                $log -cnotmatch 'test_review_rejects_camera_manifest_from_sibling_with_same_prefix.*\.\.\. ok') {
+              throw 'Original-photo contracts failed or omitted required regression tests'
+            }
+            'PASS (real command and reconstruction review contracts on hosted Windows)' |
+              Set-Content -LiteralPath "$out/outcome.txt" -Encoding utf8
+          }
+          exit 0
+
+      - uses: actions/upload-artifact@v7
+        if: always() && env.PHOTO_QA != ''
+        with:
+          name: original-photo-${{ env.MODE }}-python-${{ matrix.version }}
+          path: ${{ env.PHOTO_QA }}/evidence
+          if-no-files-found: error
+          retention-days: 14
