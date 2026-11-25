@@ -19,6 +19,9 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 
 ## 2026-11-25
 
+- **修复：列表和表格的隔行底色。** 媒体导入列表和任务记录的普通行在深浅主题下
+  使用统一底色。选中、悬停、键盘焦点和任务状态的提示保持不变。[源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/fecf2b5e697c42dccadc59d5fee0194efbd87349)
+
 - **修复：Python 3.8 下无法查看原图。** 3DGS／2DGS 共用的照片核对兼容现有训练环境，
   无需升级 Python 或重新训练。原图与路径仍按原有规则核验。
 

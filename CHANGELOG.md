@@ -22,6 +22,10 @@ separate claims.
 
 ## 2026-11-25
 
+- **Fixed: striped list and table rows.** The media import list and task records
+  use a uniform background for ordinary rows in both themes. Selection, hover,
+  keyboard focus and task status are unchanged. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/fecf2b5e697c42dccadc59d5fee0194efbd87349)
+
 - **Fixed: View Original with Python 3.8.** The shared 3DGS/2DGS photo review
   can verify originals in existing training environments without upgrading
   Python or retraining. The source-path and original-image checks are unchanged.
