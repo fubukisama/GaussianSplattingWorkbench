@@ -21,8 +21,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261118/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe"><strong>Windows x64 版をダウンロード（.exe）</strong></a> ·
-  <a href="README_RELEASE.md#日本語">インストールガイド</a>
+  <a href="https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261120.1/gsw-windows-x64-preview-start.zip"><strong>Windows x64 管理型スタートパック（ZIP）</strong></a> ·
+  <a href="https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261120.1/SHA256SUMS">SHA-256 チェックサム</a> ·
+  <a href="README_RELEASE.md#日本語">導入・更新ガイド</a>
 </p>
 
 <p align="center">
@@ -35,6 +36,10 @@
 ---
 
 <strong lang="en">Gaussian Splatting Workbench (GSW)</strong> は、写真測量、3DGS / 2DGS 学習、複数モデルの編集、出所を追跡できる出力をつなぐ Windows ネイティブアプリです。写真・動画から始めるほか、外部で求めたカメラ情報や既存モデルを使って作業できます。
+
+**初回起動：**[管理型プレビューのスタートパック（f4b5886）](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261120.1)を新しい空フォルダーに展開し、`bin/Gaussian Scene Workbench Launcher.exe` を起動してください。
+
+**自動更新を有効にする：**「ヘルプ → ソフトウェアの更新…」で「プレビュー版」を選び、「バックグラウンドで自動確認（ポップアップなし）」と「自動ダウンロードし、通常終了時にインストール」を有効にします。更新の検証後に通常終了し、同じランチャーから起動すると新版を利用できます。
 
 [GSWの特長](#gswの特長) · [入力から選ぶ](#入力から選ぶ) · [主な機能](#主な機能) · [はじめに](#はじめに) · [ドキュメント](#ドキュメント)
 
@@ -126,7 +131,7 @@ GSW は汎用ソフトウェアです。小物体、室内、建築は対象と�
 
 ## はじめに
 
-1. **検証済みの Windows x64 プレビューを入手。** [ダウンロード・導入ガイド](README_RELEASE.md#日本語)、または[ネイティブアプリのビルド手順](native/README.md)を参照してください。ソース ZIP はインストーラーではありません。
+1. **Windows x64 の管理型プレビューから始める。** [導入・更新ガイド](README_RELEASE.md#日本語)、または[ネイティブアプリのビルド手順](native/README.md)を参照してください。ソース ZIP から直接アプリは起動できません。
 2. **表示と計算のどちらを使うか選択。** 対応する既存モデルを開くだけなら、学習環境は不要です。再構築と学習には別途構成した実行環境を使い、CUDA 学習には互換性のある NVIDIA ハードウェアとバックエンド依存関係が必要です。[実行環境の設定](docs/WINDOWS_NATIVE_RUNTIME.md)
 3. **小さなプロジェクトから開始。** モデルの取り込み、メディアの追加、既知カメラのデータセット検証から始め、長時間実行する前に実効設定と出力先を確認してください。
 

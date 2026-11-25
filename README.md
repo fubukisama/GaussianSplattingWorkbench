@@ -21,8 +21,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261118/Gaussian-Scene-Workbench-0.3.9-native-preview-windows-x64-setup.exe"><strong>Download for Windows x64 (.exe)</strong></a> ·
-  <a href="README_RELEASE.md#english">Installation guide</a>
+  <a href="https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261120.1/gsw-windows-x64-preview-start.zip"><strong>Download the managed starter (Windows x64, ZIP)</strong></a> ·
+  <a href="https://github.com/fubukisama/GaussianSplattingWorkbench/releases/download/v0.3.9-native-preview.20261120.1/SHA256SUMS">SHA-256</a> ·
+  <a href="README_RELEASE.md#english">Install &amp; update guide</a>
 </p>
 
 <p align="center">
@@ -35,6 +36,10 @@
 ---
 
 **Gaussian Splatting Workbench (GSW)** connects photogrammetry, 3DGS / 2DGS training, multi-model editing and traceable export in a native Windows application. Start with photos or video, preserve an external camera solution, or bring in a model you already have.
+
+**First launch:** Extract the [managed preview starter (f4b5886)](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261120.1) into a new empty folder, then open `bin/Gaussian Scene Workbench Launcher.exe`.
+
+**Enable automatic updates:** In **Help → Software updates…**, select **Preview**. Keep **Check automatically in the background (no popups)** enabled and turn on **Download automatically and install on normal exit**. A verified update takes effect after you exit normally and reopen the same launcher.
 
 [Why GSW](#why-gsw) · [Choose your starting point](#choose-your-starting-point) · [Capabilities](#capabilities) · [Get started](#get-started) · [Documentation](#documentation)
 
@@ -126,7 +131,7 @@ Gaussian delivery includes PLY / SPZ. Point-cloud and mesh exports have their ow
 
 ## Get started
 
-1. **Get a verified Windows x64 preview.** Use the [download & installation guide](README_RELEASE.md), or [build the native application](native/README.md). A source ZIP is not an installer.
+1. **Start with the Windows x64 managed preview.** Follow the [install & update guide](README_RELEASE.md#english), or [build the native application](native/README.md). A source ZIP is not a ready-to-run build.
 2. **Choose viewing or compute.** Opening supported existing models does not require a training environment. Reconstruction and training use separately configured runtimes; CUDA training requires compatible NVIDIA hardware and backend dependencies. [Runtime setup](docs/WINDOWS_NATIVE_RUNTIME.md)
 3. **Start with a small project.** Import a model, add media, or validate a known-camera dataset. Check the effective settings and output location before a long run.
 
