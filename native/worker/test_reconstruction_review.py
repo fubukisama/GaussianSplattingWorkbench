@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -224,6 +226,53 @@ class ReconstructionReviewTests(unittest.TestCase):
                             [dict(correct, sha256="0"*64)]):
                 metadata.write_text(json.dumps(dict(version=1, files=invalid)), encoding="utf-8")
                 self.assertEqual(review_training_originals(root)["rows"], [])
+
+    def test_task_originals_command_reads_archived_photo_in_active_runtime(self):
+        from PIL import Image
+
+        with temporary_directory() as temp:
+            root = Path(temp)
+            name = "capture/frame.png"
+            archive_path = "source/originals/unprocessed.png"
+            archive = root / archive_path
+            prepared = root / "images" / name
+            for image, color in ((archive, (194, 41, 13)), (prepared, (16, 78, 213))):
+                image.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (64, 48), color).save(image)
+            model(root / "sparse/0", [name, "prepared-only.png"], binary=True)
+            (root / "images/prepared-only.png").write_bytes(prepared.read_bytes())
+            (root / "source/metadata_manifest.json").write_text(json.dumps({"version": 1, "files": [
+                {"kind": "image", "trainingPath": "images/" + name, "archivePath": archive_path,
+                 "byteSize": archive.stat().st_size}
+            ]}), encoding="utf-8")
+            before = files(root)
+            repository = Path(__file__).resolve().parents[2]
+            result = subprocess.run([sys.executable, "-B", str(repository / "native/worker/reconstruction_review.py"),
+                                     "--backend-root", str(repository), "--dataset", str(root), "--task-originals"],
+                                    cwd=str(repository), capture_output=True, encoding="utf-8", timeout=30,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            report = json.loads(result.stdout)
+            self.assertEqual(result.returncode, 0, str(report.get("diagnostic", result.stderr)))
+            self.assertTrue(report["ready"])
+            self.assertEqual(report["photoScope"], "task_originals")
+            self.assertEqual([(row["name"], row["imagePath"]) for row in report["rows"]], [(name, archive_path)])
+            snapshots = {row["path"]: row["sha256"] for row in report["snapshots"] if "sha256" in row}
+            self.assertEqual(snapshots[archive_path], before[str(Path(archive_path))])
+            self.assertNotIn("images/" + name, snapshots)
+            self.assertEqual(files(root), before)
+
+    def test_review_rejects_camera_manifest_from_sibling_with_same_prefix(self):
+        with temporary_directory() as temp:
+            root = Path(temp) / "capture"
+            sibling = root.with_name("capture-neighbor")
+            root.mkdir()
+            sibling.mkdir()
+            camera_dataset = sibling / "camera_dataset.json"
+            camera_dataset.write_text("{}", encoding="utf-8")
+            before = files(Path(temp))
+            with self.assertRaisesRegex(ValueError, "^unsafe_relative_path$"):
+                review_dataset(root, camera_dataset=str(camera_dataset))
+            self.assertEqual(files(Path(temp)), before)
 
     def test_fixed_camera_task_uses_only_a_verified_unchanged_import_copy(self):
         from PIL import Image

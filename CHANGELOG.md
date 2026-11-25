@@ -22,6 +22,10 @@ separate claims.
 
 ## 2026-11-25
 
+- **Fixed: View Original with Python 3.8.** The shared 3DGS/2DGS photo review
+  can verify originals in existing training environments without upgrading
+  Python or retraining. The source-path and original-image checks are unchanged.
+
 - **Fixed: scrollbars against form controls.** Native forms, lists, tables and
   panels share a scaled 8 px gap at 100% between content and the vertical
   or horizontal scroll track. The thumb stays the same width and the gap does

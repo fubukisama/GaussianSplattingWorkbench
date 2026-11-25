@@ -31,6 +31,15 @@ def relative_name(value):
     return path.as_posix()
 
 
+def _require_contained_path(resolved_path, resolved_root):
+    # Some supported training environments still run Python 3.8, before
+    # Path.is_relative_to(). Keep the same component-wise containment check.
+    try:
+        resolved_path.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError("unsafe_relative_path") from exc
+
+
 def safe_path(root, name):
     name = relative_name(name)
     current = root
@@ -42,8 +51,7 @@ def safe_path(root, name):
             continue
         if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError("linked_path_refused")
-    if not current.resolve().is_relative_to(root.resolve()):
-        raise ValueError("unsafe_relative_path")
+    _require_contained_path(current.resolve(), root.resolve())
     return current
 
 
@@ -391,8 +399,7 @@ def review_dataset(dataset, group=None, camera_dataset=None, expected_identity=N
     if canonical.exists() or transforms:
         from native.backend.camera_dataset import load_camera_dataset, camera_dataset_root
         source = canonical if canonical.exists() else root
-        if not source.resolve().is_relative_to(root):
-            raise ValueError("unsafe_relative_path")
+        _require_contained_path(source.resolve(), root)
         data = load_camera_dataset(source, cancelled=cancelled)
         if expected_identity and data["data_identity"] != expected_identity:
             raise ValueError("source_changed")
