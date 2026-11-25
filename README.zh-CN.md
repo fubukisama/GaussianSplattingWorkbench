@@ -37,9 +37,9 @@
 
 <strong><span lang="en">Gaussian Splatting Workbench (GSW)</span></strong> 在 Windows 原生桌面中连接摄影测量、3DGS / 2DGS 训练、多模型编辑与可追溯导出。可以从照片或视频开始，保留外部求解的相机，也可以直接打开已有模型。
 
-**首次启动：**把[托管预览首装包（f4b5886）](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261120.1)解压到新的空目录，再打开 `bin/Gaussian Scene Workbench Launcher.exe`。
+**首次启动**：把[托管预览首装包（f4b5886）](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261120.1)解压到新的空目录，再打开 `bin/Gaussian Scene Workbench Launcher.exe`。
 
-**开启自动更新：**在「帮助 → 软件更新…」选择「预览版」，保留「后台自动检查（不弹出窗口）」，并开启「自动下载并在正常退出时安装」。更新校验通过后，正常退出，再用原启动器打开即可使用新版。
+**开启自动更新**：在「帮助 → 软件更新…」选择「预览版」，保留「后台自动检查（不弹出窗口）」，并开启「自动下载并在正常退出时安装」。更新校验通过后，正常退出，再用原启动器打开即可使用新版。
 
 [为什么选择 GSW](#为什么选择-gsw) · [选择你的起点](#选择你的起点) · [功能一览](#功能一览) · [开始使用](#开始使用) · [文档](#文档)
 

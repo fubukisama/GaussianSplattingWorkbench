@@ -53,10 +53,10 @@ Compare the starter ZIP's SHA-256 with `SHA256SUMS`, then extract the ZIP into a
 
 ### 使用前确认
 
-- **已有模型：**安装桌面端后可导入受支持的 PLY / SPZ。
-- **重建／训练：**另行配置 [Windows 运行环境](docs/WINDOWS_NATIVE_RUNTIME.md)和 [COLMAP](docs/COLMAP_SETUP.md)。
-- **安装位置：**保留完整程序、DLL、插件、声明和对应源码。选择可写目录，有非系统盘时优先使用；只有 C: 的机器也可使用。
-- **安全策略：**此预览版没有 Windows 代码签名。SHA-256 只校验文件完整性，不认证发布者身份。Windows 可能警告或按策略阻止，请保留系统防护。
+- **已有模型**：安装桌面端后可导入受支持的 PLY / SPZ。
+- **重建／训练**：另行配置 [Windows 运行环境](docs/WINDOWS_NATIVE_RUNTIME.md)和 [COLMAP](docs/COLMAP_SETUP.md)。
+- **安装位置**：保留完整程序、DLL、插件、声明和对应源码。选择可写目录，有非系统盘时优先使用；只有 C: 的机器也可使用。
+- **安全策略**：此预览版没有 Windows 代码签名。SHA-256 只校验文件完整性，不认证发布者身份。Windows 可能警告或按策略阻止，请保留系统防护。
 
 ### 更新方式
 
@@ -84,10 +84,10 @@ Compare the starter ZIP's SHA-256 with `SHA256SUMS`, then extract the ZIP into a
 
 ### 利用前の確認
 
-- **既存モデル：**デスクトップ導入後、対応する PLY / SPZ を取り込めます。
-- **再構築・学習：**別途 [Windows 実行環境](docs/WINDOWS_NATIVE_RUNTIME.md)と [COLMAP](docs/COLMAP_SETUP.md) を構成します。
-- **導入先：**DLL・プラグイン・通知・対応ソースを含め全体を保持します。書込み可能な場所を選び、利用できれば非システムドライブを優先。C: のみの端末も対象です。
-- **安全性：**このプレビュー版には Windows のコード署名がありません。SHA-256 はファイルの完全性を確認するもので、発行元の身元を証明するものではありません。Windows が警告またはブロックする場合があります。Windows の保護は有効にしたままにしてください。
+- **既存モデル**：デスクトップ導入後、対応する PLY / SPZ を取り込めます。
+- **再構築・学習**：別途 [Windows 実行環境](docs/WINDOWS_NATIVE_RUNTIME.md)と [COLMAP](docs/COLMAP_SETUP.md) を構成します。
+- **導入先**：DLL・プラグイン・通知・対応ソースを含め全体を保持します。書込み可能な場所を選び、利用できれば非システムドライブを優先。C: のみの端末も対象です。
+- **安全性**：このプレビュー版には Windows のコード署名がありません。SHA-256 はファイルの完全性を確認するもので、発行元の身元を証明するものではありません。Windows が警告またはブロックする場合があります。Windows の保護は有効にしたままにしてください。
 
 ### 更新
 

@@ -37,9 +37,9 @@
 
 <strong lang="en">Gaussian Splatting Workbench (GSW)</strong> は、写真測量、3DGS / 2DGS 学習、複数モデルの編集、出所を追跡できる出力をつなぐ Windows ネイティブアプリです。写真・動画から始めるほか、外部で求めたカメラ情報や既存モデルを使って作業できます。
 
-**初回起動：**[管理型プレビューのスタートパック（f4b5886）](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261120.1)を新しい空フォルダーに展開し、`bin/Gaussian Scene Workbench Launcher.exe` を起動してください。
+**初回起動**：[管理型プレビューのスタートパック（f4b5886）](https://github.com/fubukisama/GaussianSplattingWorkbench/releases/tag/v0.3.9-native-preview.20261120.1)を新しい空フォルダーに展開し、`bin/Gaussian Scene Workbench Launcher.exe` を起動してください。
 
-**自動更新を有効にする：**「ヘルプ → ソフトウェアの更新…」で「プレビュー版」を選び、「バックグラウンドで自動確認（ポップアップなし）」と「自動ダウンロードし、通常終了時にインストール」を有効にします。更新の検証後に通常終了し、同じランチャーから起動すると新版を利用できます。
+**自動更新を有効にする**：「ヘルプ → ソフトウェアの更新…」で「プレビュー版」を選び、「バックグラウンドで自動確認（ポップアップなし）」と「自動ダウンロードし、通常終了時にインストール」を有効にします。更新の検証後に通常終了し、同じランチャーから起動すると新版を利用できます。
 
 [GSWの特長](#gswの特長) · [入力から選ぶ](#入力から選ぶ) · [主な機能](#主な機能) · [はじめに](#はじめに) · [ドキュメント](#ドキュメント)
 
