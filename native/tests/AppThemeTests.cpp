@@ -1,4 +1,5 @@
 #include "AppTheme.h"
+#include "ScrollBarClearanceProbe.h"
 #include "WrappingCheckBox.h"
 
 #include <QApplication>
@@ -14,12 +15,14 @@
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMainWindow>
 #include <QMargins>
 #include <QMenuBar>
 #include <QMouseEvent>
 #include <QPalette>
 #include <QPixmap>
+#include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRadioButton>
@@ -34,8 +37,10 @@
 #include <QTabBar>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QTextBrowser>
 #include <QToolBar>
 #include <QToolButton>
+#include <QTreeWidget>
 #include <QVariant>
 #include <QVBoxLayout>
 #include <QtTest>
@@ -172,6 +177,8 @@ private slots:
   void paintsUnifiedResizableSplitterHandles();
   void paintsHeaderRemainderAndContinuousDialogSurfaces();
   void paintsMatchingScrollableDialogBodies();
+  void leavesClearanceBesideActiveScrollBars_data();
+  void leavesClearanceBesideActiveScrollBars();
   void keepsWrappingCheckBoxResponsiveAndInteractive();
   void reusesOneScaledLayoutForBothThemes();
   void keepsAutomaticTextReadableAcrossCommonWindowSizes();
@@ -855,6 +862,104 @@ void AppThemeTests::paintsMatchingScrollableDialogBodies() {
     QVERIFY(radio.isChecked());
     dialog.hide();
   }
+}
+
+void AppThemeTests::leavesClearanceBesideActiveScrollBars_data() {
+  QTest::addColumn<bool>("dark");
+  QTest::addColumn<int>("scale");
+  for (const bool dark : {false, true}) {
+    for (const int scale : {100, 125, 150}) {
+      const QByteArray name = QByteArray(dark ? "dark-" : "light-") + QByteArray::number(scale);
+      QTest::newRow(name.constData()) << dark << scale;
+    }
+  }
+}
+
+void AppThemeTests::leavesClearanceBesideActiveScrollBars() {
+  QFETCH(bool, dark);
+  QFETCH(int, scale);
+  AppTheme::applyTheme(*qApp, dark ? UiTheme::Dark : UiTheme::Light, false);
+  AppTheme::apply(*qApp, scale, false);
+  // Independent visual targets at 100%: a clear 8px gutter outside the
+  // scroll track, and the existing 10px thumb thickness.
+  const int gap = qRound(8.0 * scale / 100);
+  const int thickness = qRound(10.0 * scale / 100);
+
+  QScrollArea form;
+  form.setFrameShape(QFrame::NoFrame);
+  form.setWidgetResizable(true);
+  auto *body = new QWidget;
+  body->setMinimumHeight(640);
+  auto *layout = new QVBoxLayout(body);
+  layout->setContentsMargins(0, 0, 0, 0); // The same crowded edge as a body form.
+  auto *button = new QPushButton(QStringLiteral("Apply"), body);
+  layout->addWidget(button);
+  layout->addStretch();
+  form.setWidget(body);
+
+  QTableWidget table(60, 4);
+  QListWidget list;
+  QTreeWidget tree;
+  QPlainTextEdit console;
+  QTextBrowser document;
+  const QString row = QStringLiteral("Synthetic scrollable row\n");
+  console.setPlainText(row.repeated(60));
+  document.setPlainText(row.repeated(60));
+  for (int i = 0; i < 60; ++i) {
+    list.addItem(QString::number(i));
+    new QTreeWidgetItem(&tree, {QString::number(i)});
+  }
+  const auto verify = [&](QAbstractScrollArea &area, QScrollBar &bar) {
+    QVERIFY(bar.isVisible());
+    QVERIFY(bar.maximum() > bar.minimum());
+    const auto measured = tests::measureScrollBarClearance(area, bar);
+    QVERIFY2(measured.contentGap >= gap, area.metaObject()->className());
+    QVERIFY(!measured.thumb.isEmpty());
+    QCOMPARE(bar.orientation() == Qt::Vertical ? measured.thumb.width()
+                                               : measured.thumb.height(), thickness);
+  };
+  const QList<QAbstractScrollArea *> areas{&form, &table, &list, &tree, &console, &document};
+  for (auto *area : areas) {
+    area->resize(340, 205);
+    area->show();
+    QTRY_VERIFY(area->verticalScrollBar()->isVisible());
+    verify(*area, *area->verticalScrollBar());
+    area->hide();
+  }
+
+  form.show();
+  auto *bar = form.verticalScrollBar();
+  QTRY_VERIFY(bar->isVisible());
+  const auto measured = tests::measureScrollBarClearance(form, *bar);
+  QVERIFY(measured.groove.left() >= gap && !measured.thumb.isEmpty());
+  QSignalSpy clicked(button, &QPushButton::clicked);
+  QTest::mouseClick(button, Qt::LeftButton);
+  QCOMPARE(clicked.size(), 1);
+
+  const QPoint thumb = measured.thumb.center();
+  const QPoint gutter(measured.groove.left() - gap / 2, thumb.y());
+  QSignalSpy scrollActions(bar, &QScrollBar::actionTriggered);
+  const int start = bar->value();
+  QTest::mouseClick(bar, Qt::LeftButton, Qt::NoModifier, gutter);
+  QCOMPARE(scrollActions.size(), 0);
+  QCOMPARE(bar->value(), start);
+  QTest::mousePress(bar, Qt::LeftButton, Qt::NoModifier, thumb);
+  const QPoint target = thumb + QPoint(0, 36);
+  QMouseEvent move(QEvent::MouseMove, QPointF(target), QPointF(bar->mapToGlobal(target)),
+                   Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+  QApplication::sendEvent(bar, &move);
+  QTest::mouseRelease(bar, Qt::LeftButton, Qt::NoModifier, target);
+  QVERIFY(bar->value() > start);
+  QCOMPARE(clicked.size(), 1);
+
+  const int narrowedWidth = form.viewport()->width();
+  form.setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  QTRY_VERIFY(!bar->isVisible());
+  QTRY_VERIFY(form.viewport()->width() >= narrowedWidth + gap + thickness);
+  body->setMinimumWidth(640);
+  auto *horizontal = form.horizontalScrollBar();
+  QTRY_VERIFY(horizontal->isVisible());
+  verify(form, *horizontal);
 }
 
 void AppThemeTests::keepsWrappingCheckBoxResponsiveAndInteractive() {

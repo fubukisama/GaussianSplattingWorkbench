@@ -2,6 +2,7 @@
 
 #include "AppLanguage.h"
 #include "AppTheme.h"
+#include "ScrollBarClearanceProbe.h"
 #include "UiSurfaceEvidence.h"
 
 #include <QApplication>
@@ -101,6 +102,37 @@ inline bool hasUiFormCapture(const QWidget &window, const QString &state,
   return false;
 }
 
+inline bool checkUiFormScrollBars(QWidget &window, const QString &state) {
+  int measured = 0;
+  int tightest = 0;
+  bool trainingBodySeen = false;
+  bool usable = true;
+  for (auto *area : window.findChildren<QAbstractScrollArea *>()) {
+    for (auto *bar : {area->verticalScrollBar(), area->horizontalScrollBar()}) {
+      if (!bar->isVisible() || bar->visibleRegion().isEmpty()) continue;
+      const auto clearance = measureScrollBarClearance(*area, *bar);
+      const bool separated = !clearance.groove.isEmpty() && clearance.contentGap >= 8;
+      if (!separated) {
+        qWarning().noquote() << "Native form scrollbar is flush or overlaps:" << state
+                             << area->metaObject()->className() << area->objectName()
+                             << bar->orientation() << clearance.contentGap;
+      }
+      tightest = measured++ == 0 ? clearance.contentGap : qMin(tightest, clearance.contentGap);
+      usable = usable && separated;
+      trainingBodySeen = trainingBodySeen ||
+          (area->objectName() == QStringLiteral("dialogBodyScroll") &&
+           bar->orientation() == Qt::Vertical && bar->maximum() > bar->minimum());
+    }
+  }
+  // Both training forms were long enough to display the reported scrollbar.
+  // Don't count a hidden or non-scrolling replacement as an accepted capture.
+  if (state.startsWith(QStringLiteral("training-3dgs-request-")) ||
+      state.startsWith(QStringLiteral("training-2dgs-request-"))) usable = usable && trainingBodySeen;
+  qInfo().noquote() << "UI_FORM_SCROLLBARS" << state << "measured" << measured
+                   << "smallestLogicalGap" << tightest << "usable" << usable;
+  return usable;
+}
+
 // The seam is an existing owned dialog and its public, immutable JSON view.
 // This probe never accepts/rejects the dialog, edits data or starts a helper.
 inline bool captureUiFormMatrix(const bool visual, QWidget &window, const QString &phase,
@@ -151,7 +183,8 @@ inline bool captureUiFormMatrix(const bool visual, QWidget &window, const QStrin
           captured = hasUiFormCapture(window, synthetic, locale, theme);
         }
         const bool unchanged = snapshot() == original;
-        const bool layoutUsable = !validateLayout || validateLayout();
+        const bool existingLayoutUsable = !validateLayout || validateLayout();
+        const bool layoutUsable = checkUiFormScrollBars(window, synthetic) && existingLayoutUsable;
         const bool native = window.isVisible() && window.windowHandle() &&
                             window.windowHandle()->isExposed() && window.size() == target;
         qInfo().noquote() << "UI_FORM_MATRIX" << phase << locale

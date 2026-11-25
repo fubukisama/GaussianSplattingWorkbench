@@ -620,11 +620,13 @@ QPlainTextEdit {
 }
 /* Explanatory text is not a terminal. Keep the raw task console monospaced. */
 QPlainTextEdit#viewportDetailsText { font-family: @BODY_FAMILIES@; }
-QScrollBar:vertical { background: @ITEM_VIEW@; width: @SCROLL@px; margin: 0; }
+/* Keep the gap on the content-facing side. Qt includes the margin in the
+   scrollbar extent, outside the track and the original thumb width. */
+QScrollBar:vertical { background: @ITEM_VIEW@; width: @SCROLL@px; margin: 0 0 0 @SCROLL_GAP@px; }
 QScrollBar::handle:vertical { background: @SCROLL_HANDLE@; min-height: 24px; border-radius: 4px; }
 QScrollBar::handle:vertical:hover { background: @ACCENT@; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QScrollBar:horizontal { background: @ITEM_VIEW@; height: @SCROLL@px; margin: 0; }
+QScrollBar:horizontal { background: @ITEM_VIEW@; height: @SCROLL@px; margin: @SCROLL_GAP@px 0 0 0; }
 QScrollBar::handle:horizontal { background: @SCROLL_HANDLE@; min-width: 24px; border-radius: 4px; }
 QScrollBar::handle:horizontal:hover { background: @ACCENT@; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
@@ -751,6 +753,7 @@ QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOL
   replace(QStringLiteral("@TAB_V@"), 5);
   replace(QStringLiteral("@TAB_H@"), 12);
   replace(QStringLiteral("@SCROLL@"), 10);
+  replace(QStringLiteral("@SCROLL_GAP@"), 8);
   replace(QStringLiteral("@SECTION_TOP@"), 6);
   replace(QStringLiteral("@SECTION_BOTTOM@"), 4);
   if (theme == UiTheme::Light) {
