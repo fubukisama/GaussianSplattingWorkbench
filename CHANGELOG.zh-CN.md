@@ -21,7 +21,7 @@ CI 附件和本地预览版交付不会自动成为公开 Release。
 
 - **修复：滚动条贴住表单控件。** 原生表单、列表、表格和面板在内容与横向／纵向
   滚动条之间统一留空，100% 界面缩放下为 8 个逻辑像素，随缩放调整。滑块原有
-  宽度与操作保留，留白不占用按钮。Windows 验收与本地交付另行记录。[源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/79927e3d22da0bf4ee3afed762c59c35dafe0b18)
+  宽度与操作保留，留白不占用按钮。Windows 验收与本地交付另行记录。[源码](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/5e56686832be65ae1f655985640c678e77473179)
 
 ## 2026-11-24
 

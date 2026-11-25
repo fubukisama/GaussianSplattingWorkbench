@@ -23,7 +23,7 @@ CI 成果物やローカルプレビューの配布は、自動的に公開 Rele
 - **修正：スクロールバーとフォームの間隔。** ネイティブフォーム、一覧、表、
   パネルの内容と縦・横スクロールバーの間に、表示倍率 100% で論理 8 px の余白を
   設けます。つまみの太さや操作、ボタンの動作は変更しません。Windows での検証と
-  ローカル配布は別途記録します。[ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/79927e3d22da0bf4ee3afed762c59c35dafe0b18)
+  ローカル配布は別途記録します。[ソース](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/5e56686832be65ae1f655985640c678e77473179)
 
 ## 2026-11-24
 

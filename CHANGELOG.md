@@ -26,7 +26,7 @@ separate claims.
   panels share a scaled 8 px gap at 100% between content and the vertical
   or horizontal scroll track. The thumb stays the same width and the gap does
   not replace a button or scroll action. Windows verification and local
-  delivery are recorded separately. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/79927e3d22da0bf4ee3afed762c59c35dafe0b18)
+  delivery are recorded separately. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/5e56686832be65ae1f655985640c678e77473179)
 
 ## 2026-11-24
 
