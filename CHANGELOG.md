@@ -20,6 +20,14 @@ in the same change, with affected capabilities, limitations and verification or
 delivery status. Implementation, verification, publication and installation remain
 separate claims.
 
+## 2026-11-25
+
+- **Fixed: scrollbars against form controls.** Native forms, lists, tables and
+  panels share a scaled 8 px gap at 100% between content and the vertical
+  or horizontal scroll track. The thumb stays the same width and the gap does
+  not replace a button or scroll action. Windows verification and local
+  delivery are recorded separately. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/79927e3d22da0bf4ee3afed762c59c35dafe0b18)
+
 ## 2026-11-24
 
 - **Fixed: Original photos in task previews.** View the corresponding original from the task's own dataset during 3DGS or 2DGS training, and on previews retained after pausing or cancelling. Missing or ambiguous original links remain unavailable; same-name processed training images are never substituted. No retraining or source-image changes are required.
