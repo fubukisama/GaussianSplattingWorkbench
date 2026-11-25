@@ -38,7 +38,6 @@ enum class UiColorRole {
   Field,
   Menu,
   ItemView,
-  AlternateItem,
   Header,
   DockTitle,
   Button,

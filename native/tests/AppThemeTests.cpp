@@ -13,6 +13,7 @@
 #include <QFormLayout>
 #include <QHeaderView>
 #include <QImage>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -177,6 +178,7 @@ private slots:
   void paintsUnifiedResizableSplitterHandles();
   void paintsHeaderRemainderAndContinuousDialogSurfaces();
   void paintsMatchingScrollableDialogBodies();
+  void paintsFlatOrdinaryRowsAndDistinctSelection();
   void leavesClearanceBesideActiveScrollBars_data();
   void leavesClearanceBesideActiveScrollBars();
   void keepsWrappingCheckBoxResponsiveAndInteractive();
@@ -861,6 +863,63 @@ void AppThemeTests::paintsMatchingScrollableDialogBodies() {
     QVERIFY(check.isChecked());
     QVERIFY(radio.isChecked());
     dialog.hide();
+  }
+}
+
+void AppThemeTests::paintsFlatOrdinaryRowsAndDistinctSelection() {
+  for (const UiTheme theme : {UiTheme::Light, UiTheme::Dark}) {
+    AppTheme::applyTheme(*qApp, theme, false);
+    AppTheme::apply(*qApp, 100, false);
+    QListWidget mediaList;
+    QTableWidget taskTable(4, 1);
+    taskTable.horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    taskTable.verticalHeader()->hide();
+    for (int row = 0; row < 4; ++row) {
+      const QString label = QString::number(row + 1);
+      mediaList.addItem(label);
+      taskTable.setItem(row, 0, new QTableWidgetItem(label));
+    }
+
+    const auto checkRows = [](QAbstractItemView &view) {
+      // Exercise the legacy opt-in too: a view's ordinary row parity must not
+      // change its appearance even if the old setting is present.
+      view.setAlternatingRowColors(true);
+      view.setSelectionBehavior(QAbstractItemView::SelectRows);
+      view.setAttribute(Qt::WA_DontShowOnScreen);
+      view.resize(360, 220);
+      view.show();
+      QApplication::processEvents();
+      view.selectionModel()->clear();
+
+      QList<QPoint> samples;
+      for (int row = 0; row < 4; ++row) {
+        const QRect cell = view.visualRect(view.model()->index(row, 0));
+        QVERIFY(cell.width() > 32 && cell.height() > 4);
+        const QPoint plainFill(cell.right() - 12, cell.center().y());
+        QVERIFY(view.viewport()->rect().contains(plainFill));
+        samples.append(plainFill);
+      }
+      const QImage normal = painted(*view.viewport());
+      QVERIFY(!normal.isNull());
+      const QColor ordinary = pixelAt(normal, samples.first());
+      QCOMPARE(ordinary.alpha(), 255);
+      for (const QPoint &sample : samples)
+        QCOMPARE(pixelAt(normal, sample), ordinary);
+
+      view.selectionModel()->select(view.model()->index(1, 0),
+          QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+      const QImage selected = painted(*view.viewport());
+      QVERIFY(pixelAt(selected, samples.at(1)) != ordinary);
+      for (const int row : {0, 2, 3})
+        QCOMPARE(pixelAt(selected, samples.at(row)), ordinary);
+
+      view.selectionModel()->clearSelection();
+      const QImage cleared = painted(*view.viewport());
+      for (const QPoint &sample : samples)
+        QCOMPARE(pixelAt(cleared, sample), ordinary);
+    };
+    checkRows(mediaList);
+    checkRows(taskTable);
   }
 }
 

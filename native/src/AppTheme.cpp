@@ -47,7 +47,6 @@ constexpr ColorDefinition kColors[] = {
     {UiColorRole::Field, "#151719", "#ffffff"},
     {UiColorRole::Menu, "#24272a", "#ffffff"},
     {UiColorRole::ItemView, "#191b1d", "#ffffff"},
-    {UiColorRole::AlternateItem, "#1e2123", "#f5f5f5"},
     {UiColorRole::Header, "#24272a", "#dedede"},
     {UiColorRole::DockTitle, "#222528", "#dedede"},
     {UiColorRole::Button, "#2a2e31", "#f3f3f3"},
@@ -188,7 +187,7 @@ QPalette AppTheme::palette(const UiTheme theme) {
     result.setColor(group, QPalette::Window, window);
     result.setColor(group, QPalette::WindowText, foreground);
     result.setColor(group, QPalette::Base, isDisabled ? disabledBase : base);
-    result.setColor(group, QPalette::AlternateBase, role(UiColorRole::AlternateItem));
+    result.setColor(group, QPalette::AlternateBase, isDisabled ? disabledBase : base);
     result.setColor(group, QPalette::Text, foreground);
     result.setColor(group, QPalette::Button, isDisabled ? disabledBase : button);
     result.setColor(group, QPalette::ButtonText, foreground);
@@ -536,7 +535,7 @@ QDialog#viewportGridDialog QDoubleSpinBox::down-arrow:disabled,
 QDialog#viewportGridDialog QDoubleSpinBox::down-arrow:off { image: url(:/icons/form-marks/down-disabled.svg); }
 QAbstractItemView {
   background: @ITEM_VIEW@;
-  alternate-background-color: @ALTERNATE@;
+  alternate-background-color: @ITEM_VIEW@;
   border: 0;
   outline: 0;
 }
@@ -697,7 +696,6 @@ QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOL
       {"@FIELD@", UiColorRole::Field},
       {"@FOCUS@", UiColorRole::Focus},
       {"@ITEM_VIEW@", UiColorRole::ItemView},
-      {"@ALTERNATE@", UiColorRole::AlternateItem},
       {"@ITEM_HOVER@", UiColorRole::ItemHover},
       {"@HEADER_TEXT@", UiColorRole::HeaderText},
       {"@HEADER_BORDER@", UiColorRole::HeaderLine},

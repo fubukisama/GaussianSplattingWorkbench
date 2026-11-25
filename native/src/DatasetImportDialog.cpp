@@ -359,7 +359,6 @@ DatasetImportDialog::DatasetImportDialog(const QString &initialDirectory,
   mSourceList = new QListWidget(this);
   mSourceList->setObjectName(QStringLiteral("datasetImportSourceList"));
   AppLanguage::bind(mSourceList, "accessibleName", AppLanguage::source("待导入媒体来源"));
-  mSourceList->setAlternatingRowColors(true);
   mSourceList->setSelectionMode(QAbstractItemView::ExtendedSelection);
   mSourceList->setMinimumHeight(72);
   rootLayout->addWidget(mSourceList, 1);

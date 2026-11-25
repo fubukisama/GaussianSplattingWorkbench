@@ -2742,7 +2742,6 @@ void MainWindow::createTaskDock() {
   mTaskTable->setHorizontalHeaderLabels(
       {QCoreApplication::translate("Workbench", "状态"), QCoreApplication::translate("Workbench", "任务"),
        QCoreApplication::translate("Workbench", "开始时间"), QCoreApplication::translate("Workbench", "结果")});
-  mTaskTable->setAlternatingRowColors(true);
   mTaskTable->setSelectionBehavior(QAbstractItemView::SelectRows);
   mTaskTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
   mTaskTable->verticalHeader()->setVisible(false);
