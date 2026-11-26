@@ -282,6 +282,186 @@ bool mainCameraPhotos(const QString &fixtureRoot,const QString &python,const QSt
                viewport->orthographicProjection()==oldProjection&&viewport->modelTranslation()==transform&&
                !lock->isChecked(),"closing the overlay restores navigation without changing the model");
 }
+
+bool completedCheckpointPhotos(const QString &fixtures, const QString &python,
+                               const QString &evidence, const QString &backend) {
+  QTemporaryDir project(QDir(fixtures).filePath(QStringLiteral("cp-XXXXXX")));
+  if (!project.isValid()) return false;
+  const auto file = project.filePath(QStringLiteral("checkpoint.gsw.json"));
+  const QDir root(WorkspaceDocument::projectDataRootForFile(file));
+  const auto scene = QStringLiteral("completed-protected-") + backend;
+  const auto dataset = root.filePath(QStringLiteral("data/owned"));
+  const auto unrelated = root.filePath(QStringLiteral("data/current"));
+  const auto output = root.filePath(QStringLiteral("out/task"));
+  const auto outputStep = QDir(output).filePath(QStringLiteral("point_cloud/iteration_10000"));
+  const auto group = QStringLiteral("task-") + QString::fromLatin1(
+      QCryptographicHash::hash(scene.toUtf8(), QCryptographicHash::Sha256).toHex().left(32));
+  const QDir checkpoint(root.filePath(QStringLiteral(".gsw/checkpoints/training/%1/iteration_10000").arg(group)));
+  const auto model = checkpoint.filePath(QStringLiteral("point_cloud.ply"));
+  const auto internal = QDir(outputStep).filePath(QStringLiteral("point_cloud.ply"));
+  const auto name = testPhotoName(1);
+  const auto archive = QStringLiteral("source/originals/") + name;
+  const auto registered = QStringLiteral("images/") + name;
+  const QDir images(dataset);
+  const QColor archiveInk(207, 43, 141), registeredInk(18, 37, 229);
+  QImage photo(64, 48, QImage::Format_RGB32);
+  const auto savePhoto = [&](const QString &absolute, const QColor &ink) {
+    photo.fill(ink);
+    return QDir().mkpath(QFileInfo(absolute).absolutePath()) && photo.save(absolute);
+  };
+  QByteArray splats = "ply\nformat ascii 1.0\nelement vertex 4\n"
+      "property float x\nproperty float y\nproperty float z\n"
+      "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\n"
+      "property float opacity\nproperty float scale_0\nproperty float scale_1\n";
+  const bool volume = backend == QStringLiteral("3dgs");
+  if (volume) splats += "property float scale_2\n";
+  splats += "property float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float rot_3\nend_header\n";
+  for (const auto *position : {"0 0 4", "0.4 0 4", "0 0.4 4", "0 0 4.4"}) {
+    splats += position;
+    splats += " 0 0 0 1 -3 -3";
+    if (volume) splats += " -3";
+    splats += " 1 0 0 0\n";
+  }
+  QJsonArray cameras;
+  for (int i = 0; i < 2; ++i) {
+    cameras.append(QJsonObject{{"id",i},{"img_name",testPhotoName(i)},{"width",64},{"height",48},
+        {"fx",50},{"fy",55},{"position",QJsonArray{0,i*.45,0}},
+        {"rotation",QJsonArray{QJsonArray{0,1,0},QJsonArray{-1,0,0},QJsonArray{0,0,1}}}});
+  }
+  const auto outputCameras = QDir(output).filePath(QStringLiteral("cameras.json"));
+  if (!check(fixture(dataset) && QDir().mkpath(outputStep) && QDir().mkpath(checkpoint.absolutePath()) &&
+             savePhoto(images.filePath(archive), archiveInk) &&
+             savePhoto(images.filePath(registered), registeredInk) &&
+             savePhoto(images.filePath(QStringLiteral("input/") + name), Qt::yellow) &&
+             savePhoto(QDir(unrelated).filePath(archive), Qt::cyan) && write(internal, splats) &&
+             QFile::copy(internal, model) && write(outputCameras, QJsonDocument(cameras).toJson()) &&
+             QFile::copy(outputCameras, checkpoint.filePath(QStringLiteral("cameras.json"))),
+             "build a disposable protected Gaussian result and three distinguishable photo roles")) return false;
+  const QJsonObject media{{"kind","image"},{"relativePath",name},{"archivePath",archive},
+      {"trainingPath",registered},{"byteSize",QFileInfo(images.filePath(archive)).size()}};
+  if (!write(images.filePath(QStringLiteral("source/metadata_manifest.json")),
+             QJsonDocument(QJsonObject{{"version",1},{"files",QJsonArray{media}}}).toJson())) return false;
+  WorkspaceDocument document;
+  QString error;
+  if (!check(document.create(root.absolutePath(), &error) && document.setDatasetPath(unrelated, &error) &&
+             document.publishGeneratedScene(model, scene, &error) && document.save(file, &error),
+             "save the exact protected result while another project dataset is selected")) return false;
+  GenerationExperiment owner;
+  owner.id = QStringLiteral("checkpoint-owner");
+  owner.pipeline = QStringLiteral("training");
+  owner.backend = backend;
+  owner.status = QStringLiteral("completed");
+  owner.datasetPath = dataset;
+  owner.outputRoot = output;
+  owner.resultPath = model;
+  owner.resultSceneId = scene;
+  owner.displayName = owner.id;
+  owner.createdAt = owner.updatedAt = QDateTime::currentDateTimeUtc();
+  owner.parameters = QJsonObject{{"nativeCheckpoint",true},{"posePolicy","solve"},
+    {"resultDeliveryOutcome",QJsonObject{{"training_status","done"},{"export_status","failed"},
+      {"association_status","ready"},{"iteration",10000},{"internal_model_path",internal},
+      {"reason","camera_scale_export_metadata_missing"}}}};
+  GenerationHistoryStore history(root.absolutePath());
+  if (!check(history.upsert(owner), "record native completion separately from the failed export")) return false;
+  const auto before = snapshot(dataset);
+  const auto savedModel = snapshot(checkpoint.absolutePath());
+  const auto previousPrefix = qgetenv("GAUSSIAN_SPLATTING_CONDA_PREFIX");
+  const auto restorePrefix = qScopeGuard([previousPrefix] {
+    if (previousPrefix.isNull()) qunsetenv("GAUSSIAN_SPLATTING_CONDA_PREFIX");
+    else qputenv("GAUSSIAN_SPLATTING_CONDA_PREFIX",previousPrefix);
+  });
+  qputenv("GAUSSIAN_SPLATTING_CONDA_PREFIX",QFileInfo(python).absolutePath().toLocal8Bit());
+
+  const auto reopen = [&](bool ambiguous) {
+    MainWindow window;
+    window.resize(1050,730);
+    window.show();
+    auto *viewport = window.findChild<NativeViewport *>();
+    auto *gallery = window.findChild<QAction *>(QStringLiteral("cameraPhotoListAction"));
+    auto *list = window.findChild<QListWidget *>(QStringLiteral("cameraPhotosList"));
+    auto *pixels = window.findChild<QLabel *>(QStringLiteral("cameraPhotoPixels"));
+    auto *status = window.findChild<QLabel *>(QStringLiteral("cameraPhotoStatus"));
+    auto *original = window.findChild<QPushButton *>(QStringLiteral("cameraPhotoOriginal"));
+    auto *overlay = window.findChild<QAction *>(QStringLiteral("showCalibratedPhotoAction"));
+    auto *opaque = window.findChild<QAction *>(QStringLiteral("calibratedPhotoOpacity100Action"));
+    if (!check(viewport && gallery && list && pixels && status && original && overlay && opaque &&
+         window.openProjectFile(file) && wait([&]{
+           return viewport->cameraCount()==2 && !viewport->displayingProcessingPreview() &&
+                  viewport->gaussianRenderingAvailable() && overlay->isEnabled();
+         }), "reopened protected completion displays its owned camera poses")) return false;
+    if (!list->isVisible()) gallery->trigger();
+    const auto select = [&](const QString &requested) {
+      const auto matches = list->findItems(requested,Qt::MatchExactly);
+      if (matches.size()!=1) return false;
+      list->setCurrentItem(matches[0]);
+      return true;
+    };
+    if (!check(wait([&]{return list->isVisible() && select(name);}),
+               "select the completed checkpoint camera by its full relative name")) return false;
+    const auto originalPixels = [&] {
+      return original->isEnabled() && !pixels->pixmap().isNull() &&
+          pixels->pixmap().toImage().pixelColor(0,0)==archiveInk;
+    };
+    const auto overlayPixels = [&] {
+      const auto frame = viewport->grabFramebuffer();
+      if (frame.isNull()) return false;
+      const QSizeF fit = QSizeF(64,48).scaled(QSizeF(frame.size()),Qt::KeepAspectRatio);
+      int count=0, total=0;
+      for (int v=7;v<43;v+=2) for (int u=7;u<59;u+=2) {
+        const auto c=frame.pixelColor(int((frame.width()-fit.width())/2+fit.width()*u/64.),
+                                      int((frame.height()-fit.height())/2+fit.height()*v/48.));
+        count += std::abs(c.red()-registeredInk.red())<=2 &&
+                 std::abs(c.green()-registeredInk.green())<=2 &&
+                 std::abs(c.blue()-registeredInk.blue())<=2;
+        ++total;
+      }
+      return count*4>=total*3;
+    };
+    const auto unlinked = [&] {
+      QElapsedTimer stable; stable.start();
+      return wait([&] {
+        if (original->isEnabled() || !pixels->pixmap().isNull() ||
+            status->text()!=cameraPhotoStatusText(CameraPhotoStatus::Unlinked) || overlayPixels()) {
+          stable.restart();
+          return false;
+        }
+        return stable.elapsed()>=400;
+      });
+    };
+    if (ambiguous) {
+      opaque->trigger();
+      overlay->setChecked(true);
+      return check(unlinked(), "competing protected completion leaves photos unlinked");
+    }
+    if (!check(wait(originalPixels), "completed checkpoint opens its verified archived original")) return false;
+    original->click();
+    if (!check(wait(originalPixels), "View Original reads the archive, not input, registered or current-project pixels")) return false;
+    if (!evidence.isEmpty() && !pixels->pixmap().save(QDir(evidence).filePath(
+            QStringLiteral("completed-checkpoint-%1-original.png").arg(backend)))) return false;
+    opaque->trigger();
+    overlay->setChecked(true);
+    if (!check(wait([&]{return overlayPixels() && originalPixels();}),
+               "completed checkpoint overlays the distinct registered picture after reopen")) return false;
+    if (!evidence.isEmpty() && !viewport->grabFramebuffer().save(QDir(evidence).filePath(
+            QStringLiteral("completed-checkpoint-%1-overlay.png").arg(backend)))) return false;
+    if (!check(select(testPhotoName(0)) && unlinked(),
+               "same-basename camera without an owning import record cannot borrow old original or overlay")) return false;
+    overlay->setChecked(false);
+    std::fprintf(stderr,"Reconstruction review PASS: completed protected %s original and registered pixels after reopen\n",
+                 qPrintable(backend));
+    std::fflush(stderr);
+    return true;
+  };
+  if (!reopen(false)) return false;
+  if (volume) {
+    auto duplicate = owner;
+    duplicate.id = QStringLiteral("competing-checkpoint-owner");
+    if (!check(history.upsert(duplicate),"record a competing terminal owner for the same result") ||
+        !reopen(true)) return false;
+  }
+  return check(!before.isEmpty() && snapshot(dataset)==before && snapshot(checkpoint.absolutePath())==savedModel,
+               "reopened checkpoint photo review leaves its source images and model bytes unchanged");
+}
 }
 bool runReconstructionReviewSmokeTest(const QString &python,const QString &backend) {
   const auto fixtureRoot=qEnvironmentVariable("GSW_RECONSTRUCTION_REVIEW_ROOT",QDir(backend).filePath(QStringLiteral(".tmp/reconstruction-review-fixtures")));
@@ -448,6 +628,8 @@ bool runReconstructionReviewSmokeTest(const QString &python,const QString &backe
   for(const auto &id:{QStringLiteral("3dgs"),QStringLiteral("2dgs")}){TrainingDialog training(temp.path(),QStringLiteral("owned"),temp.path(),true,true);auto *backendCombo=training.findChild<QComboBox*>(QStringLiteral("trainingBackendCombo"));auto *button=training.findChild<QPushButton*>(QStringLiteral("trainingReconstructionReview"));if(!backendCombo||!button)return false;backendCombo->setCurrentIndex(backendCombo->findData(id));const auto config=training.configurationDocument();int requests=0;QObject::connect(&training,&TrainingDialog::reconstructionReviewRequested,&training,[&](const QString &path,const QString &,const QString &){if(path==temp.path())++requests;});button->click();if(!check(requests==1&&training.configurationDocument()==config,"3DGS/2DGS shared review entry never changes training settings or starts a worker"))return false;}
   MeshGenerationDialog mesh(temp.path());auto *button=mesh.findChild<QPushButton*>(QStringLiteral("meshReconstructionReview"));auto *method=mesh.findChild<QComboBox*>(QStringLiteral("meshMethodCombo"));if(!button||!method)return false;int requests=0;QObject::connect(&mesh,&MeshGenerationDialog::reconstructionReviewRequested,&mesh,[&]{++requests;});for(int i=0;i<method->count();++i){method->setCurrentIndex(i);const auto config=mesh.configuration();button->click();if(!check(mesh.configuration()==config,"all mesh/depth/texture methods retain their existing configuration and compatibility gate"))return false;}
   return check(requests==method->count()&&snapshot(temp.path())==before,"shared entry emits observation requests only; no task or source write")&&
-      mainCameraPhotos(fixtureRoot,python,output);
+      mainCameraPhotos(fixtureRoot,python,output) &&
+      completedCheckpointPhotos(fixtureRoot,python,output,QStringLiteral("3dgs")) &&
+      completedCheckpointPhotos(fixtureRoot,python,output,QStringLiteral("2dgs"));
 }
 }

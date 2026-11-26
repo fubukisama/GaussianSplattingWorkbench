@@ -634,15 +634,20 @@ resolveTrainingPointCloud(const QString &outputDirectory,
   return std::nullopt;
 }
 
+QString publishedTrainingCheckpointGroup(const QString &outputDirectory,
+                                         const QString &resultSceneId) {
+  // Display names and output basenames are not unique across experiments.
+  // Object identity also survives project relocation and Save As.
+  return safeFileName(QFileInfo(outputDirectory).fileName()) +
+      QLatin1Char('-') + QString::fromLatin1(QCryptographicHash::hash(
+          resultSceneId.toUtf8(), QCryptographicHash::Sha256).toHex().left(32));
+}
+
 std::optional<ResolvedTrainingPointCloud> publishDurableTrainingPointCloud(
     const ResolvedTrainingPointCloud &checkpoint, const QString &projectRoot,
     const QString &outputDirectory, const QString &resultSceneId,
     QString *errorMessage = nullptr) {
-  // Display names and output basenames are not unique across experiments.
-  // Object identity also survives project relocation and Save As.
-  const QString group = safeFileName(QFileInfo(outputDirectory).fileName()) +
-      QLatin1Char('-') + QString::fromLatin1(QCryptographicHash::hash(
-          resultSceneId.toUtf8(), QCryptographicHash::Sha256).toHex().left(32));
+  const auto group = publishedTrainingCheckpointGroup(outputDirectory, resultSceneId);
   const auto coordinateMetadata=parsePlyCoordinateMetadata({},checkpoint.path,true);
   const bool restored=coordinateMetadata.provenance.value(QStringLiteral("schema"))==QStringLiteral("gsw.coordinate_export/1");
   const QString destination =
@@ -7425,35 +7430,47 @@ void MainWindow::refreshCameraPhotoBinding(const bool newTrajectory) {
     }
   } else if (requested && !scene.isEmpty() && !source.isEmpty() && mViewport->cameraCount() > 0 &&
              pathsReferToSameLocation(scene, mWorkspace.scenePath())) {
-    qsizetype completedOwners = 0, retainedOwners = 0;
+    qsizetype terminalOwners = 0;
     const auto checkpointRoot = QDir(mWorkspace.rootPath()).filePath(QStringLiteral(".gsw/checkpoints/training"));
+    const bool inProtectedStorage = pathIsWithinDirectory(scene, checkpointRoot);
+    const bool copiedCheckpoint = inProtectedStorage &&
+        pathsReferToSameLocation(QFileInfo(source).absolutePath(), QFileInfo(scene).absolutePath());
     for (const auto &experiment : GenerationHistoryStore(mWorkspace.rootPath()).records()) {
       if (experiment.pipeline != QStringLiteral("training") ||
           experiment.resultSceneId != mWorkspace.activeSceneId() ||
           (experiment.backend != QStringLiteral("3dgs") && experiment.backend != QStringLiteral("2dgs")) ||
           !pathsReferToSameLocation(experiment.resultPath, scene)) continue;
-      if (experiment.status == QStringLiteral("paused") || experiment.status == QStringLiteral("cancelled")) {
-        ++retainedOwners;
+      const bool completed = experiment.status == QStringLiteral("completed");
+      const bool retained = experiment.status == QStringLiteral("paused") ||
+                            experiment.status == QStringLiteral("cancelled");
+      if (!completed && !retained) continue;
+      ++terminalOwners;
+      if (retained || inProtectedStorage) {
         taskOriginals = true;
-        const bool copiedCheckpoint = pathIsWithinDirectory(scene, checkpointRoot) &&
-            pathsReferToSameLocation(QFileInfo(source).absolutePath(), QFileInfo(scene).absolutePath());
         const bool ownOutput = pathIsWithinDirectory(scene, experiment.outputRoot) &&
             pathIsWithinDirectory(source, experiment.outputRoot);
-        if (!experiment.datasetPath.isEmpty() && (copiedCheckpoint || ownOutput)) {
+        // A completed task can display its protected internal result when
+        // export fails. Its camera list travels beside that exact result,
+        // not below the normal training output root. Only use the task's
+        // dataset after matching the same storage namespace as publication.
+        const bool ownedCompletion = copiedCheckpoint && !experiment.outputRoot.isEmpty() &&
+            experiment.parameters.value(QStringLiteral("nativeCheckpoint")).toBool() &&
+            pathIsWithinDirectory(scene, QDir(checkpointRoot).filePath(
+                publishedTrainingCheckpointGroup(experiment.outputRoot, experiment.resultSceneId)));
+        if (!experiment.datasetPath.isEmpty() &&
+            (completed ? ownedCompletion : (copiedCheckpoint || ownOutput))) {
           dataset = experiment.datasetPath;
           taskIdentity = experiment.parameters.value(QStringLiteral("posePolicy")) == QJsonValue(QStringLiteral("locked"))
               ? experiment.parameters.value(QStringLiteral("cameraDatasetIdentity")).toString() : QString();
           inspect = modelIdentity.isEmpty() || modelIdentity == taskIdentity;
         }
-      } else if (experiment.status == QStringLiteral("completed") && !dataset.isEmpty() &&
+      } else if (modelIdentity.isEmpty() && !dataset.isEmpty() && !experiment.outputRoot.isEmpty() &&
                  pathsReferToSameLocation(experiment.datasetPath, dataset)) {
         const auto output = QDir(experiment.outputRoot).canonicalPath();
-        if (!output.isEmpty() && source.startsWith(output + QLatin1Char('/'), localPathCaseSensitivity()))
-          ++completedOwners;
+        inspect = !output.isEmpty() && source.startsWith(output + QLatin1Char('/'), localPathCaseSensitivity());
       }
     }
-    if (taskOriginals) inspect = retainedOwners == 1 && inspect;
-    else inspect = completedOwners == 1 && modelIdentity.isEmpty();
+    inspect = terminalOwners == 1 && inspect;
   }
   const auto key = QStringList{mWorkspace.rootPath(), dataset,
       taskOriginals ? taskIdentity : mWorkspace.cameraDatasetIdentity(),

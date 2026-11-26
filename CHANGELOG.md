@@ -22,6 +22,11 @@ separate claims.
 
 ## 2026-11-26
 
+- **Fix: photos on completed protected checkpoints.** Reopened 3DGS and 2DGS
+  results kept as internal checkpoints can show the owning task's verified
+  original and calibrated overlay even if export failed. No retraining is
+  required; unmatched or competing task records are not substituted.
+
 - **Added: camera labels and calibrated photo comparison.** Show names and
   leader lines on camera cards; in crowded views the selected label gets
   priority. Independently show a verified registered image from its calibrated
