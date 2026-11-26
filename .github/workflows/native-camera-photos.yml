@@ -81,7 +81,8 @@ jobs:
             $allowed += @(
               'CHANGELOG.md', 'CHANGELOG.zh-CN.md', 'CHANGELOG.ja.md',
               'native/i18n/catalog.json', 'native/backend/reconstruction_review.py',
-              'native/worker/test_reconstruction_review.py', 'native/src/CameraPhotoIO.cpp',
+              'native/worker/reconstruction_review.py', 'native/worker/test_reconstruction_review.py',
+              'native/src/CameraPhotoIO.cpp',
               'native/src/CameraPhotoIO.h', 'native/src/MainWindow.cpp', 'native/src/MainWindow.h',
               'native/src/MainWindowCameraPhotos.cpp', 'native/src/NativeViewport.cpp',
               'native/src/NativeViewport.h', 'native/src/ProcessingCompletionSmokeTest.cpp'
@@ -285,6 +286,19 @@ jobs:
                     throw "Missing real preview gallery result for $backend / $terminal"
                   }
                 }
+              }
+            }
+            if ($env:SUITE -ceq 'labels-overlay-green') {
+              foreach ($backend in @('3dgs', '2dgs')) {
+                foreach ($terminal in @('paused', 'cancelled')) {
+                  if (!$log.Contains("Processing completion PASS: $backend live + $terminal calibrated comparison")) {
+                    throw "Missing real calibrated viewport result for $backend / $terminal"
+                  }
+                }
+              }
+              if (!$log.Contains('the back layer exposes the surveyed quad at its independently known photo pixels') -or
+                  !$log.Contains('camera labels add visible leaders without enabling the separate photo overlay')) {
+                throw 'Missing gallery/geometry result'
               }
             }
             'PASS (scoped real Windows viewport, not full release acceptance)' |
