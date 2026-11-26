@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--expected-identity")
     parser.add_argument("--model-directory")
     parser.add_argument("--task-originals", action="store_true")
+    parser.add_argument("--registered-overlay", action="store_true")
     args = parser.parse_args()
     sys.path.insert(0, str(Path(args.backend_root).resolve()))
     try:
@@ -22,8 +23,11 @@ def main():
         if args.task_originals:
             if args.model_directory or args.camera_dataset or args.group:
                 raise ValueError("task_originals_require_exact_dataset")
-            result = review_training_originals(args.dataset, args.expected_identity)
+            result = review_training_originals(args.dataset, args.expected_identity,
+                                               include_registered=args.registered_overlay)
         else:
+            if args.registered_overlay:
+                raise ValueError("registered_overlay_requires_owned_task")
             result = (review_model(args.model_directory, args.group, args.camera_dataset)
                       if args.model_directory else
                       review_dataset(args.dataset, args.group, args.camera_dataset, args.expected_identity))

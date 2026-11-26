@@ -27,6 +27,7 @@ class QFileSystemWatcher;
 class QFrame;
 class QLabel;
 class QListWidget;
+class QMenu;
 class QMoveEvent;
 class QPlainTextEdit;
 class QProcess;
@@ -140,6 +141,7 @@ private:
   void createProjectDock();
   void createInspectorDock();
   void createCameraPhotoDock();
+  void addCalibratedPhotoMenu(QMenu *cameraMenu);
   void stopCameraPhotoCallbacks();
   void refreshCameraPhotoBinding(bool newTrajectory = false);
   void rebuildCameraPhotoList();
@@ -363,6 +365,8 @@ private:
   QAction *mPointRenderAction = nullptr;
   QAction *mShowCamerasAction = nullptr;
   QAction *mShowCameraPhotosAction = nullptr;
+  QAction *mShowCameraLabelsAction = nullptr;
+  QAction *mShowCalibratedPhotoAction = nullptr;
   QAction *mShowCameraFrustumsAction = nullptr;
   QAction *mShowCameraOrderAction = nullptr;
   QDockWidget *mCameraPhotoDock = nullptr;

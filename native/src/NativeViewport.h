@@ -25,6 +25,7 @@
 #include <QImage>
 #include <QColor>
 #include <QJsonObject>
+#include <QLineF>
 #include <QElapsedTimer>
 #include <QMatrix4x4>
 #include <QOpenGLBuffer>
@@ -141,6 +142,11 @@ public:
   void setShowCameraFrustums(bool enabled);
   void setShowCameraRecordOrder(bool enabled);
   void setShowCameraPhotos(bool enabled);
+  void setShowCameraLabels(bool enabled);
+  void setShowCalibratedPhoto(bool enabled);
+  void setCalibratedPhotoInFront(bool enabled);
+  void setCalibratedPhotoLocked(bool locked);
+  void setCalibratedPhotoOpacity(int percent);
   void setCameraPhotoDataset(const QString &root, const QString &inputIdentity);
   void setCameraPhotoReview(const QJsonObject &report, const QString &taskCameraIdentity = {});
   [[nodiscard]] QString cameraInputDataIdentity() const;
@@ -318,6 +324,7 @@ public:
 
 signals:
   void viewportPresentationChanged();
+  void calibratedPhotoLockChanged(bool locked);
   void viewportDetailsRequested();
   void processingPreviewChanged();
   void processingPreviewPausedChanged(bool paused);
@@ -576,6 +583,13 @@ private:
     float focalAspectCorrection = 1.0F;
     NavigationAxis axisView = NavigationAxis::None;
   };
+  struct PhotoOverlayReturnView {
+    StoredCameraView view;
+    std::optional<StoredCameraView> storedSourceView;
+    std::optional<std::array<double, 7>> intrinsics;
+    std::optional<std::array<double, 2>> clipping;
+    bool sourceActive;
+  };
 
   enum class TransformConstraintKind { None, Axis, Plane };
 
@@ -669,11 +683,38 @@ private:
     QPointF center;
     float depth;
   };
+  struct ProjectedCameraLabel final {
+    qsizetype index;
+    QRectF box;
+    QLineF leader;
+    QString text;
+  };
   [[nodiscard]] QList<ProjectedCameraCard> projectCameraCards(
       const QMatrix4x4 &viewProjection) const;
+  [[nodiscard]] QList<ProjectedCameraLabel> placeCameraLabels(
+      const QList<ProjectedCameraCard> &cards) const;
   [[nodiscard]] qsizetype cameraCardAt(const QPointF &position) const;
   [[nodiscard]] bool cameraPhotoContextMatches() const;
-  void replaceCameraPhotoReferences(QHash<qsizetype, CameraPhotoReference> references);
+  struct CalibratedPhoto {
+    CameraPhotoReference reference;
+    std::array<double, 7> intrinsics;
+    QString imageName;
+    friend bool operator==(const CalibratedPhoto &, const CalibratedPhoto &) = default;
+  };
+  [[nodiscard]] static std::optional<CalibratedPhoto> calibratedPhoto(
+      const CameraPose &pose, const CameraPhotoReference &reference);
+  void replaceCameraPhotoReferences(QHash<qsizetype, CameraPhotoReference> references,
+      QHash<qsizetype, CalibratedPhoto> calibrated);
+  void scheduleCalibratedPhoto();
+  void updateCalibratedPhoto();
+  void readCalibratedPhoto();
+  void invalidateCalibratedPhoto();
+  [[nodiscard]] QString calibratedPhotoKey(qsizetype index) const;
+  [[nodiscard]] bool calibratedPhotoAligned() const;
+  [[nodiscard]] bool calibratedPhotoTransformSupported() const;
+  [[nodiscard]] QRectF calibratedPhotoRect(const std::array<double, 7> &k) const;
+  void drawCalibratedPhoto(QPainter &painter);
+  [[nodiscard]] QString calibratedPhotoStatusText() const;
   void queueCameraThumbnails(const QList<ProjectedCameraCard> &cards);
   void readNextCameraThumbnail();
   void drawCameraTrajectory(QPainter &painter,
@@ -839,6 +880,26 @@ private:
   bool mShowCameraFrustums = false;
   bool mShowCameraRecordOrder = false;
   bool mShowCameraPhotos = false;
+  bool mShowCameraLabels = false;
+  bool mShowCalibratedPhoto = false;
+  bool mCalibratedPhotoInFront = true;
+  bool mCalibratedPhotoLocked = false;
+  bool mCalibratedPhotoNavigationQueued = false;
+  bool mCalibratedPhotoReadBusy = false;
+  bool mCalibratedPhotoKeyUnavailable = false;
+  int mCalibratedPhotoOpacity = 50;
+  qsizetype mCalibratedPhotoIndex = -1;
+  QString mCalibratedPhotoRequestedKey;
+  std::weak_ptr<SceneState> mCalibratedPhotoViewScene;
+  std::optional<PhotoOverlayReturnView> mCalibratedPhotoReturnView;
+  QMatrix4x4 mCalibratedPhotoModel;
+  QMatrix4x4 mCalibratedPhotoView;
+  QHash<qsizetype, CalibratedPhoto> mCalibratedPhotos;
+  CameraPhotoRead mCalibratedPhotoRead;
+  bool mCalibratedPhotoReadRequired = false;
+  QFileSystemWatcher *mCalibratedPhotoFile = nullptr;
+  std::shared_ptr<std::atomic<quint64>> mCalibratedPhotoEpoch =
+      std::make_shared<std::atomic<quint64>>(0);
   bool mCameraThumbPumpQueued = false;
   bool mCameraThumbBusy = false;
   qsizetype mHighlightedCameraPhoto = -1;

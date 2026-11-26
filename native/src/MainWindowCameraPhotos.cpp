@@ -3,6 +3,7 @@
 #include "AppLanguage.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QCoreApplication>
 #include <QDockWidget>
 #include <QDir>
@@ -12,6 +13,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
 #include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
@@ -23,6 +25,53 @@
 #include <utility>
 
 namespace gsw {
+
+void MainWindow::addCalibratedPhotoMenu(QMenu *cameraMenu) {
+  auto *menu = AppLanguage::text(cameraMenu->addMenu(QString()), AppLanguage::source("照片叠加"), "title");
+  menu->setObjectName(QStringLiteral("calibratedPhotoMenu"));
+  const auto add = [menu](const char *name, const char *label) {
+    auto *action = AppLanguage::text(menu->addAction(QString()), label);
+    action->setObjectName(QString::fromLatin1(name));
+    action->setCheckable(true);
+    return action;
+  };
+  mShowCalibratedPhotoAction = add("showCalibratedPhotoAction", AppLanguage::source("显示标定照片"));
+  mShowCalibratedPhotoAction->setEnabled(mViewport->cameraCount() > 0);
+  AppLanguage::bind(mShowCalibratedPhotoAction, "toolTip", AppLanguage::source("从对应相机比较照片与模型；关闭后返回原视图。标定照片可能已去畸变，与原图不同。"));
+  auto *front = add("calibratedPhotoFrontAction", AppLanguage::source("叠在模型前方"));
+  auto *behind = add("calibratedPhotoBehindAction", AppLanguage::source("放在模型后方"));
+  auto *layers = new QActionGroup(menu);
+  layers->addAction(front);
+  layers->addAction(behind);
+  front->setChecked(true);
+  connect(layers, &QActionGroup::triggered, menu, [this,front](QAction *action) {
+    mViewport->setCalibratedPhotoInFront(action == front);
+  });
+  auto *lock = add("lockCalibratedPhotoAction", AppLanguage::source("锁定当前照片"));
+  lock->setEnabled(false);
+  AppLanguage::bind(lock, "toolTip", AppLanguage::source("锁定当前比较照片；解锁后可随视角切换或选择其他相机。"));
+  connect(lock, &QAction::toggled, mViewport, &NativeViewport::setCalibratedPhotoLocked);
+  connect(mViewport, &NativeViewport::calibratedPhotoLockChanged, lock, &QAction::setChecked);
+  auto *opacity = AppLanguage::text(menu->addMenu(QString()), AppLanguage::source("叠加不透明度"), "title");
+  auto *levels = new QActionGroup(opacity);
+  for (const int percent : {25, 50, 75, 100}) {
+    auto *action = opacity->addAction(QStringLiteral("%1%").arg(percent));
+    action->setCheckable(true);
+    action->setObjectName(QStringLiteral("calibratedPhotoOpacity%1Action").arg(percent));
+    action->setData(percent);
+    levels->addAction(action);
+    action->setChecked(percent == 50);
+  }
+  connect(levels, &QActionGroup::triggered, menu, [this](QAction *action) {
+    mViewport->setCalibratedPhotoOpacity(action->data().toInt());
+  });
+  connect(mShowCalibratedPhotoAction, &QAction::toggled, menu, [this,lock](bool shown) {
+    lock->setEnabled(shown);
+    mViewport->setShowCalibratedPhoto(shown);
+    mShowCalibratedPhotoAction->setEnabled(shown || mViewport->cameraCount() > 0);
+    refreshCameraPhotoBinding();
+  });
+}
 
 void MainWindow::createCameraPhotoDock() {
   mCameraPhotoCallbacks = new QObject(this);

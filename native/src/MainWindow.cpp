@@ -1681,6 +1681,9 @@ void MainWindow::createActions() {
       "showCameraPhotosAction", QStringLiteral("view/showCameraPhotos"),
       &NativeViewport::setShowCameraPhotos);
   AppLanguage::bind(mShowCameraPhotosAction, "toolTip", AppLanguage::source("在相机牌显示可核实的照片；双击相机牌查看原图。"));
+  mShowCameraLabelsAction = addCameraOption(AppLanguage::source("显示相机标签"),
+      "showCameraLabelsAction", QStringLiteral("view/showCameraLabels"), &NativeViewport::setShowCameraLabels);
+  AppLanguage::bind(mShowCameraLabelsAction, "toolTip", AppLanguage::source("在视口显示照片名称和引线；相机密集时优先显示选中项。"));
   mShowCameraFrustumsAction = addCameraOption(AppLanguage::source("完整视锥"),
       "showCameraFrustumsAction", QStringLiteral("view/showCameraFrustums"),
       &NativeViewport::setShowCameraFrustums);
@@ -2263,9 +2266,11 @@ void MainWindow::createMenus() {
   cameraMenu->setObjectName(QStringLiteral("cameraDisplayMenu"));
   cameraMenu->addAction(mShowCamerasAction);
   cameraMenu->addAction(mShowCameraPhotosAction);
+  cameraMenu->addAction(mShowCameraLabelsAction);
   cameraMenu->addAction(mShowCameraFrustumsAction);
   cameraMenu->addAction(mShowCameraOrderAction);
   cameraMenu->addSeparator();
+  addCalibratedPhotoMenu(cameraMenu);
   cameraMenu->addAction(mCameraPhotoDock->toggleViewAction());
   QMenu *referencePlaneMenu =
       AppLanguage::text(viewMenu->addMenu(QCoreApplication::translate("Workbench", "基准面网格")), AppLanguage::source("基准面网格"), "title");
@@ -3993,6 +3998,8 @@ void MainWindow::connectServices() {
         mCameraTrajectoryError = error;
         mShowCamerasAction->setEnabled(cameraCount > 0);
         mShowCameraPhotosAction->setEnabled(cameraCount > 0);
+        mShowCameraLabelsAction->setEnabled(cameraCount > 0);
+        mShowCalibratedPhotoAction->setEnabled(cameraCount > 0 || mShowCalibratedPhotoAction->isChecked());
         mShowCameraFrustumsAction->setEnabled(cameraCount > 0);
         mShowCameraOrderAction->setEnabled(cameraCount > 0);
         refreshCameraPhotoBinding(true);
@@ -7396,7 +7403,8 @@ void MainWindow::refreshCameraPhotoBinding(const bool newTrajectory) {
   const auto source = mCameraSourcePath.isEmpty() ? QString() : QFileInfo(mCameraSourcePath).canonicalFilePath();
   const bool preview = mViewport->displayingProcessingPreview();
   const auto task = mViewport->trainingPreviewPhotoScope();
-  const bool requested = (mShowCamerasAction->isChecked() && mShowCameraPhotosAction->isChecked()) ||
+  const bool overlay = mShowCalibratedPhotoAction && mShowCalibratedPhotoAction->isChecked();
+  const bool requested = overlay || (mShowCamerasAction->isChecked() && mShowCameraPhotosAction->isChecked()) ||
                          mCameraPhotoDock->isVisible();
   bool taskOriginals = preview;
   bool inspect = false;
@@ -7452,6 +7460,7 @@ void MainWindow::refreshCameraPhotoBinding(const bool newTrajectory) {
       preview ? task.runId : scene, preview ? QString() : mWorkspace.activeSceneId(),
       source, modelIdentity, taskOriginals ? QStringLiteral("originals") : QStringLiteral("result"),
       inspect ? QStringLiteral("owned") : QStringLiteral("unlinked"),
+      taskOriginals && overlay ? QStringLiteral("registered-overlay") : QString(),
       requested ? QStringLiteral("photos") : QStringLiteral("cards")}.join(QLatin1Char('\n'));
   if (key == mCameraPhotoLookupKey && (!newTrajectory || preview)) {
     if (newTrajectory) {
@@ -7505,6 +7514,7 @@ void MainWindow::refreshCameraPhotoBinding(const bool newTrajectory) {
       QStringLiteral("--backend-root"), root, QStringLiteral("--dataset"), dataset};
   if (taskOriginals) {
     arguments.append(QStringLiteral("--task-originals"));
+    if (overlay) arguments.append(QStringLiteral("--registered-overlay"));
     if (!taskIdentity.isEmpty()) arguments.append({QStringLiteral("--expected-identity"), taskIdentity});
   } else {
     arguments.append({QStringLiteral("--group"), QStringLiteral("sparse/0")});

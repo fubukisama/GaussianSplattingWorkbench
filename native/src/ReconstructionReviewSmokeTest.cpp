@@ -6,6 +6,7 @@
 #include "AppLanguage.h"
 #include "AppTheme.h"
 #include "MainWindow.h"
+#include "AppLanguage.h"
 #include "ViewportCamera.h"
 #include <QAction>
 #include <QApplication>
@@ -25,12 +26,14 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QScopeGuard>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <array>
 #include <cstdio>
 #include <cmath>
 #include <functional>
@@ -67,7 +70,25 @@ bool mainCameraPhotos(const QString &fixtureRoot,const QString &python,const QSt
   const auto dataset=root.filePath(QStringLiteral("datasets/two-photos"));
   const auto output=root.filePath(QStringLiteral("output/fixture"));
   const auto model=QDir(output).filePath(QStringLiteral("result.ply"));
-  if(!QDir().mkpath(output)||!fixture(dataset)||!QFile::copy(QDir(dataset).filePath(QStringLiteral("owned-main.ply")),model))return false;
+  if(!QDir().mkpath(output)||!fixture(dataset))return false;
+  // Independently surveyed quad. At camera 1, K projects these four world
+  // corners onto (35,25), (41,25), (41,31), (35,31) in the 64x48 raster.
+  const QByteArray quad =
+      "ply\nformat ascii 1.0\nelement vertex 6\nproperty float x\nproperty float y\nproperty float z\n"
+      "property uchar red\nproperty uchar green\nproperty uchar blue\n"
+      "element face 2\nproperty list uchar int vertex_indices\nend_header\n"
+      "0.07272727 0.21 4 255 100 20\n0.07272727 -0.27 4 255 100 20\n"
+      "0.50909091 -0.27 4 255 100 20\n0.50909091 0.21 4 255 100 20\n"
+      "-1 -1 -1 255 100 20\n1 1 4 255 100 20\n3 0 2 1\n3 0 3 2\n";
+  const QColor firstRaster(46,179,12), secondRaster(14,27,233);
+  const auto registeredPath=[&](int i) {
+    return QDir(dataset).filePath(QStringLiteral("images/") + testPhotoName(i));
+  };
+  QImage registered(64,48,QImage::Format_RGB32);
+  registered.fill(firstRaster);
+  if(!write(model,quad)||!registered.save(registeredPath(0)))return false;
+  registered.fill(secondRaster);
+  if(!registered.save(registeredPath(1)))return false;
   QJsonArray cameras;
   for(int i=0;i<2;++i) {
     cameras.append(QJsonObject{{"id",i},{"img_name",testPhotoName(i)},{"width",64},{"height",48},
@@ -116,13 +137,150 @@ bool mainCameraPhotos(const QString &fixtureRoot,const QString &python,const QSt
   list->setCurrentRow(1);
   if(!check(wait([&]{return !pixels->pixmap().isNull()&&pixels->pixmap().toImage().pixelColor(0,0)==QColor(230,140,180);}),
             "main dock displays the verified second original and not the same-name neighbor"))return false;
-  if(!evidence.isEmpty()&&(!QDir().mkpath(evidence)||!window.grab().save(QDir(evidence).filePath(QStringLiteral("camera-photos-main-window.png")))))return false;
+  auto *labels=window.findChild<QAction *>(QStringLiteral("showCameraLabelsAction"));
+  if(!check(labels&&labels->isEnabled()&&labels->isCheckable(),
+            "camera name leaders have an independent viewport control"))return false;
+  auto *overlay=window.findChild<QAction *>(QStringLiteral("showCalibratedPhotoAction"));
+  auto *lock=window.findChild<QAction *>(QStringLiteral("lockCalibratedPhotoAction"));
+  auto *behind=window.findChild<QAction *>(QStringLiteral("calibratedPhotoBehindAction"));
+  auto *front=window.findChild<QAction *>(QStringLiteral("calibratedPhotoFrontAction"));
+  auto *opaque=window.findChild<QAction *>(QStringLiteral("calibratedPhotoOpacity100Action"));
+  auto *partial=window.findChild<QAction *>(QStringLiteral("calibratedPhotoOpacity25Action"));
+  if(!check(overlay&&lock&&behind&&front&&opaque&&partial&&overlay->isEnabled()&&
+            wait([&]{return viewport->isValid()&&viewport->meshRenderingAvailable();}),
+            "real main viewport admits a calibrated photo comparison over visible geometry"))return false;
+  viewport->setRenderMode(NativeViewport::RenderMode::Mesh);
+  viewport->setShowFrameRate(false);
+  viewport->setAxisView(NavigationAxis::PositiveZ);
+  if(!check(wait([&]{return viewport->orthographicProjection()&&
+           std::abs(viewport->viewOrbitAngles().pitchDegrees-90.F)<.01F;}),
+            "the camera label view reaches its settled orthographic pose"))return false;
+  const auto evidenceFile=[&](const QString &name) { return QDir(evidence).filePath(name); };
+  if(!evidence.isEmpty()&&!QDir().mkpath(evidence))return false;
+  labels->setChecked(false);
+  const auto unlabelled=viewport->grabFramebuffer();
+  labels->trigger();
+  const auto labelled=viewport->grabFramebuffer();
+  qsizetype added=0;
+  if(unlabelled.size()==labelled.size())
+    for(int y=90;y<labelled.height()-35;++y)
+      for(int x=8;x<labelled.width()-70;++x)
+        added += labelled.pixel(x,y)!=unlabelled.pixel(x,y);
+  if(!check(added>150&&thumbs->isChecked()&&!overlay->isChecked(),
+            "camera labels add visible leaders without enabling the separate photo overlay"))return false;
+  if(!evidence.isEmpty()&&(!window.grab().save(evidenceFile(QStringLiteral("camera-photos-main-window.png")))||
+      !labelled.save(evidenceFile(QStringLiteral("camera-labels-framebuffer.png")))))return false;
+  const auto prevLanguage=AppLanguage::current();
+  const auto resetLanguage=qScopeGuard([&]{ (void)AppLanguage::apply(prevLanguage,false); });
+  const std::array<QString,3> languages{QStringLiteral("zh_CN"),QStringLiteral("en_US"),QStringLiteral("ja_JP")};
+  const std::array<QString,3> captions{QString::fromUtf8("显示相机标签"),
+      QString::fromLatin1("Show Camera Labels"),QString::fromUtf8("カメラのラベルを表示")};
+  for(size_t i=0;i<languages.size();++i) {
+    if(!check(AppLanguage::apply(languages[i],false)&&labels->text()==captions[i]&&labels->isChecked(),
+              "camera label caption follows the live language without resetting its state"))return false;
+    if(!evidence.isEmpty()&&!viewport->grabFramebuffer().save(evidenceFile(
+           QStringLiteral("camera-labels-%1.png").arg(languages[i]))))return false;
+  }
+  labels->trigger();
   const auto transform=viewport->modelTranslation();
   locate->click();
   const auto frame=orbitFrame(viewport->viewOrbitAngles());
   const auto center=viewport->viewTarget()+frame.cameraOffsetDirection*viewport->viewDistance();
-  return check((center-viewport->sceneCoordinates().localFromGlobal({0,.45,0})).length()<.0001F&&
-               viewport->modelTranslation()==transform,"main photo panel locates the exact pose without editing its model");
+  if(!check((center-viewport->sceneCoordinates().localFromGlobal({0,.45,0})).length()<.0001F&&
+            viewport->modelTranslation()==transform,"main photo panel locates the exact pose without editing its model"))return false;
+  viewport->restoreSourceCameraView();
+  show->setChecked(false);
+  const auto oldTarget=viewport->viewTarget();
+  const auto oldAngles=viewport->viewOrbitAngles();
+  const auto oldProjection=viewport->orthographicProjection();
+  const auto eye=[&] {
+    return viewport->viewTarget()+orbitFrame(viewport->viewOrbitAngles()).cameraOffsetDirection*viewport->viewDistance();
+  };
+  const auto sample=[](const QImage &image,double u,double v) {
+    if(image.isNull())return QColor();
+    const QSizeF size=QSizeF(64,48).scaled(QSizeF(image.size()),Qt::KeepAspectRatio);
+    return image.pixelColor(int((image.width()-size.width())/2+size.width()*u/64.),
+                            int((image.height()-size.height())/2+size.height()*v/48.));
+  };
+  const auto paints=[&](const QColor &expected) {
+    const auto image=viewport->grabFramebuffer();
+    int hits=0, total=0;
+    // An opaque flat fixture should occupy most of its calibrated rectangle.
+    // Do not infer which photo is displayed from one pixel: the real viewport
+    // also draws editable gizmos, bounds, labels and controls over the image.
+    for(int v=7;v<43;v+=2) for(int u=7;u<59;u+=2) {
+      const auto actual=sample(image,u,v);
+      hits+=actual.isValid()&&std::abs(actual.red()-expected.red())<=2&&
+             std::abs(actual.green()-expected.green())<=2&&std::abs(actual.blue()-expected.blue())<=2;
+      ++total;
+    }
+    return hits*4>=total*3;
+  };
+  opaque->trigger();
+  overlay->trigger();
+  if(!check(wait([&]{return paints(secondRaster);}),"front overlay uses the exact registered pixels rather than archived original"))return false;
+  auto frontFrame=viewport->grabFramebuffer();
+  if(!evidence.isEmpty()&&!frontFrame.save(evidenceFile(QStringLiteral("calibrated-front.png"))))return false;
+  behind->trigger();
+  const auto behindFrame=viewport->grabFramebuffer();
+  const auto inQuad=sample(behindFrame,38,28);
+  if(!check(sample(frontFrame,38,28)==secondRaster&&inQuad.isValid()&&
+            inQuad.red()>inQuad.blue()&&sample(behindFrame,33,28)==secondRaster&&
+            sample(behindFrame,43,28)==secondRaster&&sample(behindFrame,38,22)==secondRaster,
+            "the back layer exposes the surveyed quad at its independently known photo pixels"))return false;
+  if(!evidence.isEmpty()&&!behindFrame.save(evidenceFile(QStringLiteral("calibrated-behind.png"))))return false;
+  front->trigger();
+  partial->trigger();
+  const auto blended=sample(viewport->grabFramebuffer(),38,28);
+  if(!check(blended.red()>secondRaster.red()&&blended.red()<inQuad.red()&&blended.blue()>inQuad.blue(),
+            "lower front opacity blends the same calibrated pixels with the model"))return false;
+  opaque->trigger();
+  lock->trigger();
+  if(!check(lock->isChecked()&&viewport->setSourceCameraView(0)&&wait([&]{return paints(secondRaster);})&&
+            (eye()-center).length()<.0001F,"the locked comparison holds its photo and exact pose while the view moves"))return false;
+  lock->trigger();
+  const bool positioned=viewport->setSourceCameraView(0);
+  const auto beforeFollow=eye();
+  const auto expectedEye=viewport->sceneCoordinates().localFromGlobal({0,0,0});
+  if(!check(!lock->isChecked()&&positioned&&wait([&]{
+              return paints(firstRaster)&&(eye()-expectedEye).length()<.0001F;}),
+            "unlocked comparison follows the closest calibrated camera after navigation")) {
+    const auto actualFrame=viewport->grabFramebuffer();
+    const auto actualEye=eye();
+    const auto point=sample(actualFrame,20,36);
+    qsizetype firstPixels=0,secondPixels=0;
+    for(int y=0;y<actualFrame.height();y+=4) for(int x=0;x<actualFrame.width();x+=4) {
+      const auto color=actualFrame.pixelColor(x,y);
+      firstPixels+=color==firstRaster; secondPixels+=color==secondRaster;
+    }
+    std::fprintf(stderr,"Comparison witness: lock=%d positioned=%d eye before=[%.9g,%.9g,%.9g]"
+        " after=[%.9g,%.9g,%.9g] expected=[%.9g,%.9g,%.9g] sample=[%d,%d,%d]"
+        " frame-quarter-samples first=%lld second=%lld\n",
+        lock->isChecked(),positioned,beforeFollow.x(),beforeFollow.y(),beforeFollow.z(),
+        actualEye.x(),actualEye.y(),actualEye.z(),expectedEye.x(),expectedEye.y(),expectedEye.z(),
+        point.red(),point.green(),point.blue(),static_cast<long long>(firstPixels),static_cast<long long>(secondPixels));
+    if(!evidence.isEmpty()) (void)actualFrame.save(evidenceFile(QStringLiteral("auto-follow-failed.png")));
+    list->setCurrentRow(0);
+    const bool manual=wait([&]{return paints(firstRaster);});
+    std::fprintf(stderr,"Comparison witness: explicit selection independently finds first raster=%d\n",manual);
+    if(!evidence.isEmpty()) (void)viewport->grabFramebuffer().save(evidenceFile(QStringLiteral("manual-first-witness.png")));
+    return false;
+  }
+  if(!evidence.isEmpty()&&!viewport->grabFramebuffer().save(evidenceFile(QStringLiteral("calibrated-auto-follow.png"))))return false;
+  list->setCurrentRow(0);
+  list->setCurrentRow(1);
+  if(!check(wait([&]{return paints(secondRaster);}),"choosing a photo in the linked list changes comparison camera"))return false;
+  const auto rawRef=viewport->cameraPhotoReference(1);
+  const auto wrongRaster=readCameraPhoto(rawRef,QSize(64,48),{},QSize(64,47));
+  if(!check(wrongRaster.status==CameraPhotoStatus::InvalidCalibration&&wrongRaster.pixels.isNull(),
+            "even successfully hashed photo bytes cannot overlay with a different calibrated raster size"))return false;
+  registered.fill(Qt::yellow);
+  if(!check(registered.save(registeredPath(1))&&wait([&]{return !paints(secondRaster)&&!paints(Qt::yellow);}),
+            "replacement pixels invalidate the comparison without replacing the verified photo"))return false;
+  overlay->trigger();
+  return check(viewport->viewTarget()==oldTarget&&viewport->viewOrbitAngles()==oldAngles&&
+               viewport->orthographicProjection()==oldProjection&&viewport->modelTranslation()==transform&&
+               !lock->isChecked(),"closing the overlay restores navigation without changing the model");
 }
 }
 bool runReconstructionReviewSmokeTest(const QString &python,const QString &backend) {

@@ -580,7 +580,19 @@ sys.exit(2)
     auto *list = gallery.findChild<QListWidget *>(QStringLiteral("cameraPhotosList"));
     auto *original = gallery.findChild<QPushButton *>(QStringLiteral("cameraPhotoOriginal"));
     auto *photo = gallery.findChild<QLabel *>(QStringLiteral("cameraPhotoPixels"));
-    if (!check(viewport && panel && list && original && photo, "find actual preview gallery controls")) return false;
+    auto *overlay = gallery.findChild<QAction *>(QStringLiteral("showCalibratedPhotoAction"));
+    auto *opaque = gallery.findChild<QAction *>(QStringLiteral("calibratedPhotoOpacity100Action"));
+    if (!check(viewport && panel && list && original && photo && overlay && opaque,
+               "find actual preview gallery and calibrated comparison controls")) return false;
+    const auto overlayMatches = [&] {
+      const auto frame = viewport->grabFramebuffer();
+      if (frame.isNull()) return false;
+      // Uniform registered-blue raster away from HUD and model edges.
+      const auto fit = QSizeF(64, 48).scaled(QSizeF(frame.size()), Qt::KeepAspectRatio);
+      const auto pixel = frame.pixelColor(int(frame.width() / 2. - .12 * fit.width()),
+                                          int(frame.height() / 2. + .19 * fit.height()));
+      return pixel.blue() >= 251 && pixel.red() <= 4 && pixel.green() <= 4;
+    };
     QObject::connect(viewport, &NativeViewport::cameraTrajectoryChanged, &gallery,
         [&](qsizetype, qsizetype, bool, const QString &source, const QString &) { presentedCameraSource = source; });
     for (const auto &backend : {QStringLiteral("3dgs"), QStringLiteral("2dgs")}) {
@@ -657,6 +669,17 @@ sys.exit(2)
         };
         if (!check(list->isVisible() && select(poseName), "select the exact task camera in the visible dock") ||
             !check(wait(contentMatches), "live preview opens its verified task original before optimizer completion")) return false;
+        opaque->trigger();
+        overlay->setChecked(true);
+        if (!check(wait([&] { return overlayMatches() && contentMatches(); }),
+                   "live task compares its registered raster and separately retains the archived original") ||
+            !check(select(QStringLiteral("decoy/frame.png")) && !overlayMatches(),
+                   "requesting a same-basename unbound camera does not reuse the previous overlay") ||
+            !check(select(poseName) && wait([&] { return overlayMatches() && contentMatches(); }),
+                   "reselecting the exact task camera restores the registered overlay")) return false;
+        const auto evidence = qEnvironmentVariable("GSW_CAMERA_EVIDENCE");
+        if (!evidence.isEmpty() && !viewport->grabFramebuffer().save(
+            QDir(evidence).filePath(QStringLiteral("screenshots/%1-calibrated-live.png").arg(task)))) return false;
         original->click();
         if (!check(wait(contentMatches), "View Original displays the archived pixels, not the prepared input or training copy") ||
             !check(select(QStringLiteral("decoy/frame.png")) && !original->isEnabled() && photo->pixmap().isNull(),
@@ -664,8 +687,8 @@ sys.exit(2)
             !check(select(poseName) && wait(contentMatches) && write(stage, "advance"),
                    "prepare a second actual observation with the same selected camera") ||
             !check(wait([&] { return viewport->scenePath().endsWith(QStringLiteral("/preview_000002.ply")) &&
-                                      contentMatches(); }),
-                   "new observation does not forget the selected original or require a new selection")) return false;
+                                      contentMatches() && overlayMatches(); }),
+                   "new observation retains the selected original and its registered comparison")) return false;
         const bool associatedPause = pause && backend == QStringLiteral("2dgs");
         if (associatedPause &&
             !check(write(output.filePath(QStringLiteral("point_cloud/iteration_2/point_cloud.ply")),
@@ -685,6 +708,13 @@ sys.exit(2)
         } else if (!check(viewport->hasProcessingPreview() && wait(contentMatches),
                           "the retained terminal preview keeps its task-owned original without a published model")) return false;
         original->click();
+        if (!check(overlay->isChecked() && wait([&] { return overlayMatches() && contentMatches(); }),
+                   "calibrated comparison has registered pixels and an independent terminal original")) return false;
+        std::fprintf(stderr, "Processing completion PASS: %s live + %s calibrated comparison\n",
+                     qPrintable(backend), qPrintable(terminal));
+        if (!evidence.isEmpty() && !viewport->grabFramebuffer().save(
+            QDir(evidence).filePath(QStringLiteral("screenshots/%1-calibrated-retained.png").arg(task)))) return false;
+        overlay->setChecked(false);
         if (!check(wait(contentMatches) && readBytes(raw) == originalBytes,
                    "View Original reads but does not change the task dataset after Pause/Stop")) return false;
         std::fprintf(stderr, "Processing completion PASS: %s live + %s original photo pixels\n",

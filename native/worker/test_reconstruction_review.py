@@ -88,6 +88,9 @@ class ReconstructionReviewTests(unittest.TestCase):
                 self.assertEqual(result["groups"][0]["meanReprojectionError"], 0.)
                 self.assertEqual(result["groups"][0]["cameraCount"], 1)
                 self.assertEqual(result["rows"][0]["pose"]["K"], [[50, 0, 32], [0, 55, 24], [0, 0, 1]])
+                self.assertEqual(result["rows"][0]["registeredPhotoPath"], "images/" + names[0])
+                self.assertNotEqual(result["rows"][0]["registeredPhotoPath"], result["rows"][0]["imagePath"])
+                self.assertTrue(all(not r.get("registeredPhotoPath") for r in other["rows"]))
 
     def test_missing_original_list_does_not_invent_seven_unregistered_rows(self):
         with temporary_directory() as temp:
@@ -221,11 +224,22 @@ class ReconstructionReviewTests(unittest.TestCase):
             self.assertEqual(files(root), before)
             self.assertNotIn("input/" + names[0], {x["path"] for x in report["snapshots"]})
             self.assertNotIn("images/" + names[0], {x["path"] for x in report["snapshots"]})
+            overlay = review_training_originals(root, include_registered=True)
+            self.assertEqual(overlay["rows"][0]["imagePath"], "source/originals/preserved.png")
+            self.assertEqual(overlay["rows"][0]["registeredPhotoPath"], "images/" + names[0])
+            registered = next(x for x in overlay["snapshots"] if x["path"] == "images/" + names[0])
+            self.assertEqual(registered["sha256"], hashlib.sha256((root / registered["path"]).read_bytes()).hexdigest())
+            self.assertEqual(files(root), before)
             for invalid in ([correct, dict(correct, trainingPath=correct["trainingPath"].upper())],
                             [dict(correct, archivePath="images/" + names[0])],
                             [dict(correct, sha256="0"*64)]):
                 metadata.write_text(json.dumps(dict(version=1, files=invalid)), encoding="utf-8")
                 self.assertEqual(review_training_originals(root)["rows"], [])
+            metadata.write_text(json.dumps(dict(version=1, files=[correct])), encoding="utf-8")
+            (root / "images" / names[0]).unlink()
+            row = review_training_originals(root, include_registered=True)["rows"][0]
+            self.assertEqual(row["imagePath"], "source/originals/preserved.png")
+            self.assertFalse(row.get("registeredPhotoPath"))
 
     def test_task_originals_command_reads_archived_photo_in_active_runtime(self):
         from PIL import Image
@@ -301,6 +315,8 @@ class ReconstructionReviewTests(unittest.TestCase):
             report = review_training_originals(root, identity)
             self.assertEqual([(r["id"], r["imagePath"]) for r in report["rows"]],
                              [(view["view_id"], "train/original.png")])
+            self.assertEqual(review_training_originals(root, identity, include_registered=True)
+                             ["rows"][0]["registeredPhotoPath"], "train/original.png")
             with self.assertRaisesRegex(ValueError, "source_changed"):
                 review_training_originals(root, "a"*64 if identity != "a"*64 else "b"*64)
             metadata.write_text(json.dumps(dict(version=2, kind="fixed_camera_dataset", posePolicy="locked",

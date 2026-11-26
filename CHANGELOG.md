@@ -20,6 +20,18 @@ in the same change, with affected capabilities, limitations and verification or
 delivery status. Implementation, verification, publication and installation remain
 separate claims.
 
+## 2026-11-26
+
+- **Added: camera labels and calibrated photo comparison.** Show names and
+  leader lines on camera cards; in crowded views the selected label gets
+  priority. Independently show a verified registered image from its calibrated
+  pose in front of or behind the model, adjust opacity or lock the photo. Turn
+  the overlay off to return to the previous view. These are display-only
+  features shared by 3DGS and 2DGS, including owned training previews.
+- **Photo compatibility:** comparison uses a raster verified against its
+  pinhole calibration. The registered/undistorted image is distinct from
+  **View Original**; mismatched or unverifiable images are not substituted.
+
 ## 2026-11-25
 
 - **Fixed: striped list and table rows.** The media import list and task records

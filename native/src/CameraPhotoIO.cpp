@@ -72,7 +72,7 @@ bool validCameraPhotoRelativePath(const QString &path) {
   return true;
 }
 
-QHash<QString, CameraPhotoReference> cameraPhotoReferences(const QJsonObject &review) {
+QHash<QString, CameraPhotoReference> cameraPhotoReferences(const QJsonObject &review, CameraPhotoRole role) {
   const auto root = review.value(QStringLiteral("dataset")).toString();
   const auto rows = review.value(QStringLiteral("rows")).toArray();
   const auto snapshots = review.value(QStringLiteral("snapshots")).toArray();
@@ -82,11 +82,18 @@ QHash<QString, CameraPhotoReference> cameraPhotoReferences(const QJsonObject &re
       !QDir::isAbsolutePath(root) || rows.size() > 20000 || snapshots.size() > 100000) return {};
   QHash<QString, QString> hashes;
   QSet<QString> duplicatePaths;
+  QHash<QString, int> foldedCounts;
+  const bool calibrated = role == CameraPhotoRole::Calibrated;
+  const bool locked = review.value(QStringLiteral("sourceKind")) == QStringLiteral("locked");
+  const bool colmap = review.value(QStringLiteral("sourceKind")) == QStringLiteral("colmap") &&
+      review.value(QStringLiteral("selectedGroup")) == QStringLiteral("sparse/0");
+  const auto fold = [](const QString &path) { return path.normalized(QString::NormalizationForm_C).toCaseFolded(); };
   for (const auto &value : snapshots) {
     const auto record = value.toObject();
     const auto path = record.value(QStringLiteral("path")).toString();
     const auto hash = record.value(QStringLiteral("sha256")).toString();
     if (!validCameraPhotoRelativePath(path) || !validCameraPhotoDigest(hash)) continue;
+    if (calibrated) ++foldedCounts[fold(path)];
     if (hashes.contains(path)) duplicatePaths.insert(path);
     else hashes.insert(path, hash);
   }
@@ -99,15 +106,23 @@ QHash<QString, CameraPhotoReference> cameraPhotoReferences(const QJsonObject &re
     if (id.isEmpty()) continue;
     if (seenIds.contains(id)) { result.remove(id); continue; }
     seenIds.insert(id);
-    const auto path = row.value(QStringLiteral("imagePath")).toString();
+    const auto path = row.value(calibrated ? QStringLiteral("registeredPhotoPath") : QStringLiteral("imagePath")).toString();
     const auto it = hashes.constFind(path);
+    if (calibrated) {
+      const auto pose = row.value(QStringLiteral("pose")).toObject();
+      const auto image = pose.value(QStringLiteral("image_path")).toString();
+      if (it == hashes.cend() || foldedCounts.value(fold(path)) != 1 ||
+          !validCameraPhotoRelativePath(image) ||
+          !(locked ? path == image && pose.value(QStringLiteral("sha256")) == *it
+                  : colmap && path == QStringLiteral("images/") + image)) continue;
+    }
     if (it != hashes.cend()) result.insert(id, {root, path, *it});
   }
   return result;
 }
 
 CameraPhotoRead readCameraPhoto(const CameraPhotoReference &reference, const QSize limit,
-                               const std::function<bool()> &cancelled) {
+                               const std::function<bool()> &cancelled, const QSize calibratedRaster) {
   const auto stopped = [&] { return cancelled && cancelled(); };
   if (stopped()) return {{}, CameraPhotoStatus::Cancelled};
   if (!validCameraPhotoDigest(reference.sha256) ||
@@ -137,10 +152,13 @@ CameraPhotoRead readCameraPhoto(const CameraPhotoReference &reference, const QSi
   QBuffer source(&bytes);
   if (!source.open(QIODevice::ReadOnly)) return {{}, CameraPhotoStatus::Unreadable};
   QImageReader reader(&source);
-  reader.setAutoTransform(true);
+  reader.setAutoTransform(!calibratedRaster.isValid());
   const auto dimensions = reader.size();
   if (!dimensions.isValid() || dimensions.isEmpty() || qint64(dimensions.width()) * dimensions.height() > kLimitPixels)
     return {{}, CameraPhotoStatus::Unreadable};
+  if (calibratedRaster.isValid() && (dimensions != calibratedRaster ||
+      reader.transformation() != QImageIOHandler::TransformationNone))
+    return {{}, CameraPhotoStatus::InvalidCalibration};
   reader.setScaledSize(dimensions.boundedTo(dimensions.scaled(limit, Qt::KeepAspectRatio)));
   auto image = reader.read();
   if (stopped()) return {{}, CameraPhotoStatus::Cancelled};
@@ -157,6 +175,8 @@ QString cameraPhotoStatusText(const CameraPhotoStatus status) {
     return QCoreApplication::translate("Workbench", "对应原图已变化，未使用替换文件。");
   case CameraPhotoStatus::Unreadable:
     return QCoreApplication::translate("Workbench", "原图不可读、已变化或超过预览预算。");
+  case CameraPhotoStatus::InvalidCalibration:
+    return QCoreApplication::translate("Workbench", "照片尺寸或方向与标定不一致，未叠加。");
   case CameraPhotoStatus::Cancelled:
     return {};
   default:

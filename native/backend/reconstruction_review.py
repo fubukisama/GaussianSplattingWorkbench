@@ -271,7 +271,7 @@ def _finish_review(report, inspection):
     return report
 
 
-def review_training_originals(dataset, expected_identity=None, cancelled=None):
+def review_training_originals(dataset, expected_identity=None, cancelled=None, *, include_registered=False):
     """Verify only captured originals in the admitted training dataset.
 
     An old COLMAP workflow can reconstruct input/ by copying images/. Neither
@@ -330,7 +330,10 @@ def review_training_originals(dataset, expected_identity=None, cancelled=None):
                     record.get("sourceUnchanged") is True and record.get("relativePath") == path and
                     record.get("trainingPath") == path and record.get("sha256") == view["sha256"] and
                     original_snapshot(path, record) is not None):
-                report["rows"].append(dict(id=view["view_id"], name=path, imagePath=path, pose=view))
+                row = dict(id=view["view_id"], name=path, imagePath=path, pose=view)
+                if include_registered:
+                    row["registeredPhotoPath"] = path
+                report["rows"].append(row)
     elif records:
         model = safe_path(root, group)
         rows, _, _, _ = _read_model(inspection, model, include_points=False)
@@ -373,9 +376,25 @@ def review_training_originals(dataset, expected_identity=None, cancelled=None):
                     archive_uses[folded(match[1])] != 1 or not row["pose"]):
                 continue
             name, path, record = match
-            if original_snapshot(path, record) is not None:
-                report["rows"].append(dict(id=hashlib.sha256(name.encode()).hexdigest(),
-                                           name=name, imagePath=path, pose=row["pose"]))
+            original = original_snapshot(path, record)
+            item = dict(id=hashlib.sha256(name.encode()).hexdigest(), name=name,
+                        imagePath=path if original is not None else None, pose=row["pose"])
+            if include_registered:
+                # sparse/0 calibration describes the registered raster, not
+                # an undistorted/cropped image's archived source. Both paths
+                # must come from this unique task record, never a basename.
+                registered = record["trainingPath"]
+                try:
+                    if inspection.capture(safe_path(root, registered), 256 * 1024 * 1024) is not None:
+                        item["registeredPhotoPath"] = registered
+                except InterruptedError:
+                    raise
+                except (OSError, ValueError):
+                    # An unavailable calibrated raster must not suppress an
+                    # otherwise verified original or cause a fallback to it.
+                    pass
+            if original is not None or item.get("registeredPhotoPath"):
+                report["rows"].append(item)
     return _finish_review(report, inspection)
 
 
@@ -420,6 +439,8 @@ def review_dataset(dataset, group=None, camera_dataset=None, expected_identity=N
                        training=view["split"] == "train", pose=view, poseReason=None, perImageError=None)
             if path is None:
                 row.update(status="missing", pose=None, poseReason="missing_image")
+            else:
+                row["registeredPhotoPath"] = row["imagePath"]
             report["rows"].append(row)
         report["frame"] = "canonical"
     else:
@@ -531,6 +552,9 @@ def review_dataset(dataset, group=None, camera_dataset=None, expected_identity=N
                     row.update(imageId=record["imageId"], cameraId=record["cameraId"])
                     if row["imagePath"]:
                         row.update(pose=record["pose"], poseReason=record["poseReason"])
+                        if (row["pose"] and selected == report["actualTrainingGroup"] == "sparse/0" and
+                                train_names is not None and name in train_names):
+                            row["registeredPhotoPath"] = training[name]
             except ValueError as exc:
                 row.update(status="conflict", registered=None, training=None,
                            pose=None, poseReason=str(exc), imagePath=None)

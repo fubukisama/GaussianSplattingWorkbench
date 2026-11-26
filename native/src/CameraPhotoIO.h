@@ -18,7 +18,8 @@ struct CameraPhotoReference final {
   friend bool operator==(const CameraPhotoReference &, const CameraPhotoReference &) = default;
 };
 
-enum class CameraPhotoStatus { Available, Unlinked, Missing, Changed, Unreadable, Cancelled };
+enum class CameraPhotoRole { Original, Calibrated };
+enum class CameraPhotoStatus { Available, Unlinked, Missing, Changed, Unreadable, InvalidCalibration, Cancelled };
 struct CameraPhotoRead final {
   QImage pixels;
   CameraPhotoStatus status = CameraPhotoStatus::Unlinked;
@@ -26,9 +27,10 @@ struct CameraPhotoRead final {
 
 [[nodiscard]] bool validCameraPhotoDigest(const QString &digest);
 [[nodiscard]] bool validCameraPhotoRelativePath(const QString &path);
-[[nodiscard]] QHash<QString, CameraPhotoReference> cameraPhotoReferences(const QJsonObject &review);
+[[nodiscard]] QHash<QString, CameraPhotoReference> cameraPhotoReferences(const QJsonObject &review,
+    CameraPhotoRole role = CameraPhotoRole::Original);
 [[nodiscard]] CameraPhotoRead readCameraPhoto(const CameraPhotoReference &reference, QSize limit,
-    const std::function<bool()> &cancelled = {});
+    const std::function<bool()> &cancelled = {}, QSize calibratedRaster = {});
 [[nodiscard]] QString cameraPhotoStatusText(CameraPhotoStatus status);
 
 } // namespace gsw

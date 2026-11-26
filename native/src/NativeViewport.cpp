@@ -599,6 +599,7 @@ NativeViewport::NativeViewport(QWidget *parent) : QOpenGLWidget(parent) {
 
 NativeViewport::~NativeViewport() {
   ++*mCameraPhotoEpoch;
+  ++*mCalibratedPhotoEpoch;
   disconnect(mLichtFeldContextDestruction);
   releaseLichtFeldTrainingProgram();
   if (context() != nullptr && context()->isValid()) {
@@ -1207,13 +1208,19 @@ void NativeViewport::mapViewToScene(const QMatrix4x4 &mapping) {
   mTarget=mapping.map(mTarget);
   mDistance*=lengthScale;mYawDegrees=angles.yawDegrees;mPitchDegrees=angles.pitchDegrees;mRollDegrees=angles.rollDegrees;
   if(mCameraViewActive&&mSourceCameraClipping)for(auto &length:*mSourceCameraClipping)length*=lengthScale;
-  if(mStoredCameraView) {
-    auto &stored=*mStoredCameraView;
+  const auto mapStored=[&](StoredCameraView &stored) {
     const auto savedAngles=mappedAngles({stored.yawDegrees,stored.pitchDegrees,stored.rollDegrees});
     if (savedAngles != OrbitAngles{stored.yawDegrees,stored.pitchDegrees,stored.rollDegrees})
       stored.axisView = NavigationAxis::None;
     stored.target=mapping.map(stored.target);stored.distance*=lengthScale;
     stored.yawDegrees=savedAngles.yawDegrees;stored.pitchDegrees=savedAngles.pitchDegrees;stored.rollDegrees=savedAngles.rollDegrees;
+  };
+  if(mStoredCameraView) mapStored(*mStoredCameraView);
+  if (mCalibratedPhotoReturnView && mCalibratedPhotoViewScene.lock() == mScene) {
+    auto &saved = *mCalibratedPhotoReturnView;
+    mapStored(saved.view);
+    if (saved.storedSourceView) mapStored(*saved.storedSourceView);
+    if (saved.clipping) for (auto &length : *saved.clipping) length *= lengthScale;
   }
 }
 
@@ -2238,6 +2245,12 @@ void NativeViewport::setShowCameraPhotos(const bool enabled) {
   update();
 }
 
+void NativeViewport::setShowCameraLabels(const bool enabled) {
+  if (mShowCameraLabels == enabled) return;
+  mShowCameraLabels = enabled;
+  update();
+}
+
 bool NativeViewport::cameraPhotoContextMatches() const {
   return mCameraPhotoScene.lock() == mScene &&
          mCameraPhotoTrajectoryGeneration == mScene->mPublishedCameraTrajectoryRevision;
@@ -2268,15 +2281,55 @@ CameraPhotoReference NativeViewport::cameraPhotoReference(const qsizetype index)
 bool NativeViewport::highlightCameraPhoto(const qsizetype index) {
   if (index < 0 || index >= cameraCount()) return false;
   mHighlightedCameraPhoto = index;
+  if (mShowCalibratedPhoto && !mCalibratedPhotoLocked) {
+    if (calibratedPhotoKey(index) != calibratedPhotoKey(mCalibratedPhotoIndex))
+      invalidateCalibratedPhoto();
+    mCalibratedPhotoRequestedKey = calibratedPhotoKey(index);
+    mCalibratedPhotoKeyUnavailable = false;
+    scheduleCalibratedPhoto();
+  }
   update();
   return true;
 }
 
-void NativeViewport::replaceCameraPhotoReferences(QHash<qsizetype, CameraPhotoReference> references) {
-  if (mCameraPhotoScene.lock() == mScene && mCameraPhotoReferences == references) {
+std::optional<NativeViewport::CalibratedPhoto> NativeViewport::calibratedPhoto(
+    const CameraPose &pose, const CameraPhotoReference &reference) {
+  if (pose.intrinsics.size() != 3 || pose.width < 1 || pose.height < 1 ||
+      qint64(pose.width) * pose.height > 64'000'000 ||
+      (pose.pixelCoordinates != QStringLiteral("pixel_border") &&
+       pose.pixelCoordinates != QStringLiteral("opencv_integer")) ||
+      !validCameraPhotoDigest(reference.sha256) || !validCameraPhotoRelativePath(reference.relativePath))
+    return std::nullopt;
+  const auto x = pose.intrinsics[0].toArray(), y = pose.intrinsics[1].toArray();
+  const auto z = pose.intrinsics[2].toArray();
+  if (x.size() != 3 || y.size() != 3 || z.size() != 3 ||
+      y[0].toDouble(1.) != 0. || z[0].toDouble(1.) != 0. ||
+      z[1].toDouble(1.) != 0. || z[2].toDouble() != 1.) return std::nullopt;
+  const double offset = pose.pixelCoordinates == QStringLiteral("opencv_integer") ? .5 : 0.;
+  const double invalid = std::numeric_limits<double>::quiet_NaN();
+  const std::array<double, 7> k{x[0].toDouble(invalid), y[1].toDouble(invalid),
+      x[2].toDouble(invalid) + offset, y[2].toDouble(invalid) + offset, x[1].toDouble(invalid),
+      double(pose.width), double(pose.height)};
+  if (k[0] <= 0. || k[1] <= 0. || !std::all_of(k.begin(), k.end(),
+      [](double value) { return std::isfinite(value); })) return std::nullopt;
+  return CalibratedPhoto{reference, k, pose.imageName};
+}
+
+void NativeViewport::replaceCameraPhotoReferences(QHash<qsizetype, CameraPhotoReference> references,
+    QHash<qsizetype, CalibratedPhoto> calibrated) {
+  const bool sameScene = mCameraPhotoScene.lock() == mScene;
+  if (sameScene && mCameraPhotoReferences == references && mCalibratedPhotos == calibrated) {
     mCameraPhotoTrajectoryGeneration = mScene->mPublishedCameraTrajectoryRevision;
+    scheduleCalibratedPhoto();
     return;
   }
+  if (!sameScene) {
+    mCalibratedPhotoReturnView.reset();
+    mCalibratedPhotoRequestedKey.clear();
+    setCalibratedPhotoLocked(false);
+  }
+  if (!sameScene || mCalibratedPhotos != calibrated) invalidateCalibratedPhoto();
+  mCalibratedPhotos = std::move(calibrated);
   ++*mCameraPhotoEpoch;
   mCameraPhotoScene = mScene;
   mCameraPhotoTrajectoryGeneration = mScene->mPublishedCameraTrajectoryRevision;
@@ -2288,35 +2341,277 @@ void NativeViewport::replaceCameraPhotoReferences(QHash<qsizetype, CameraPhotoRe
   if (mCameraPhotoFiles && !mCameraPhotoFiles->files().isEmpty())
     mCameraPhotoFiles->removePaths(mCameraPhotoFiles->files());
   emit cameraPhotoContextChanged();
+  scheduleCalibratedPhoto();
   update();
 }
 
 void NativeViewport::setCameraPhotoDataset(const QString &root, const QString &inputIdentity) {
   QHash<qsizetype, CameraPhotoReference> references;
+  QHash<qsizetype, CalibratedPhoto> calibrated;
   if (QDir::isAbsolutePath(root) && validCameraPhotoDigest(inputIdentity) &&
       inputIdentity == cameraInputDataIdentity()) {
     const auto &cameras = mScene->mCameraTrajectory.cameras();
     for (qsizetype index = 0; index < cameras.size(); ++index) {
       const auto &camera = cameras[index];
       if (!camera.viewId.isEmpty() && validCameraPhotoDigest(camera.imageSha256) &&
-          validCameraPhotoRelativePath(camera.imageName))
-        references.insert(index, {root, camera.imageName, camera.imageSha256});
+          validCameraPhotoRelativePath(camera.imageName)) {
+        const CameraPhotoReference ref{root, camera.imageName, camera.imageSha256};
+        references.insert(index, ref);
+        if (mScene->mCameraTrajectory.metadataVerified())
+          if (const auto photo = calibratedPhoto(camera, ref)) calibrated.insert(index, *photo);
+      }
     }
   }
-  replaceCameraPhotoReferences(std::move(references));
+  replaceCameraPhotoReferences(std::move(references), std::move(calibrated));
+}
+
+void NativeViewport::setShowCalibratedPhoto(const bool enabled) {
+  if (mShowCalibratedPhoto == enabled) return;
+  mShowCalibratedPhoto = enabled;
+  invalidateCalibratedPhoto();
+  if (enabled) {
+    mCalibratedPhotoRequestedKey = calibratedPhotoKey(mHighlightedCameraPhoto);
+    scheduleCalibratedPhoto();
+  } else {
+    if (mCalibratedPhotoReturnView && mCalibratedPhotoViewScene.lock() == mScene) {
+      mViewSnapTimer->stop();
+      const auto &saved = *mCalibratedPhotoReturnView;
+      restoreProcessingView(saved.view);
+      mStoredCameraView = saved.storedSourceView;
+      mSourceCameraIntrinsics = saved.intrinsics;
+      mSourceCameraClipping = saved.clipping;
+      mCameraViewActive = saved.sourceActive;
+    }
+    mCalibratedPhotoReturnView.reset();
+    mCalibratedPhotoViewScene.reset();
+    mCalibratedPhotoRequestedKey.clear();
+    setCalibratedPhotoLocked(false);
+  }
+  update();
+}
+
+void NativeViewport::setCalibratedPhotoInFront(const bool enabled) {
+  mCalibratedPhotoInFront = enabled;
+  update();
+}
+
+void NativeViewport::setCalibratedPhotoLocked(const bool locked) {
+  if (mCalibratedPhotoLocked == locked) return;
+  mCalibratedPhotoLocked = locked;
+  if (!locked) mCalibratedPhotoRequestedKey.clear();
+  else if (mCalibratedPhotoIndex >= 0)
+    mCalibratedPhotoRequestedKey = calibratedPhotoKey(mCalibratedPhotoIndex);
+  mCalibratedPhotoKeyUnavailable = false;
+  emit calibratedPhotoLockChanged(locked);
+  scheduleCalibratedPhoto();
+  update();
+}
+
+void NativeViewport::setCalibratedPhotoOpacity(const int percent) {
+  mCalibratedPhotoOpacity = std::clamp(percent, 1, 100);
+  update();
+}
+
+QString NativeViewport::calibratedPhotoKey(const qsizetype index) const {
+  const auto &cameras = mScene->mCameraTrajectory.cameras();
+  if (index < 0 || index >= cameras.size()) return {};
+  const auto &pose = cameras[index];
+  // Relative paths and canonical view IDs are distinct namespaces.
+  return !pose.viewId.isEmpty() ? QStringLiteral("id:") + pose.viewId :
+      !pose.imageName.isEmpty() ? QStringLiteral("image:") + pose.imageName : QString();
+}
+
+void NativeViewport::invalidateCalibratedPhoto() {
+  ++*mCalibratedPhotoEpoch;
+  mCalibratedPhotoRead = {};
+  mCalibratedPhotoReadRequired = false;
+  mCalibratedPhotoKeyUnavailable = false;
+  mCalibratedPhotoIndex = -1;
+  if (mCalibratedPhotoFile && !mCalibratedPhotoFile->files().isEmpty())
+    mCalibratedPhotoFile->removePaths(mCalibratedPhotoFile->files());
+}
+
+bool NativeViewport::calibratedPhotoTransformSupported() const {
+  // A non-uniform or mirrored object transform cannot keep the same physical
+  // pinhole camera using this viewport's ordinary orthonormal view matrix.
+  const auto model = modelMatrix();
+  const auto x = model.mapVector(QVector3D(1, 0, 0));
+  const auto y = model.mapVector(QVector3D(0, 1, 0));
+  const auto z = model.mapVector(QVector3D(0, 0, 1));
+  const float scale = x.length();
+  if (!std::isfinite(scale) || scale < 1e-8F) return false;
+  const auto a = x / scale, b = y / scale, c = z / scale;
+  return std::abs(b.lengthSquared() - 1.F) < 1e-5F &&
+      std::abs(c.lengthSquared() - 1.F) < 1e-5F &&
+      std::abs(QVector3D::dotProduct(a, b)) < 1e-5F &&
+      (QVector3D::crossProduct(a, b) - c).lengthSquared() < 1e-10F;
+}
+
+bool NativeViewport::calibratedPhotoAligned() const {
+  if (!mShowCalibratedPhoto || !mScene->visible || !mCameraViewActive || mOrthographic ||
+      !cameraPhotoContextMatches() || mCalibratedPhotoViewScene.lock() != mScene ||
+      !mSourceCameraIntrinsics) return false;
+  const auto photo = mCalibratedPhotos.constFind(mCalibratedPhotoIndex);
+  return photo != mCalibratedPhotos.cend() && *mSourceCameraIntrinsics == photo->intrinsics &&
+      mCalibratedPhotoView == viewMatrix() && mCalibratedPhotoModel == modelMatrix();
+}
+
+QRectF NativeViewport::calibratedPhotoRect(const std::array<double, 7> &k) const {
+  const double scale = std::min(double(width()) / k[5], double(height()) / k[6]);
+  const QSizeF fitted(k[5] * scale, k[6] * scale);
+  return QRectF(QPointF((width() - fitted.width()) / 2., (height() - fitted.height()) / 2.), fitted);
+}
+
+void NativeViewport::scheduleCalibratedPhoto() {
+  if (!mShowCalibratedPhoto || mCalibratedPhotoNavigationQueued || !mScene->visible ||
+      !cameraPhotoContextMatches() || mCalibratedPhotos.isEmpty() ||
+      mCalibratedPhotoKeyUnavailable || mPressedButtons != Qt::NoButton ||
+      mViewSnapTimer->isActive() || calibratedPhotoAligned() ||
+      (displayingProcessingPreview() && (mProcessingPreviewPaused || mProcessingPreviewResumePending)) ||
+      !calibratedPhotoTransformSupported()) return;
+  mCalibratedPhotoNavigationQueued = true;
+  QTimer::singleShot(130, this, [this] {
+    mCalibratedPhotoNavigationQueued = false;
+    updateCalibratedPhoto();
+  });
+}
+
+void NativeViewport::updateCalibratedPhoto() {
+  if (!mShowCalibratedPhoto || !mScene->visible || !cameraPhotoContextMatches() ||
+      mCalibratedPhotos.isEmpty() || mPressedButtons != Qt::NoButton ||
+      mViewSnapTimer->isActive() || !calibratedPhotoTransformSupported() ||
+      (displayingProcessingPreview() && (mProcessingPreviewPaused || mProcessingPreviewResumePending)))
+    return;
+  // A camera photograph is not a texture on the model. Use the settled free
+  // view to choose a pose, then compare from exactly that one pinhole camera.
+  const auto model = modelMatrix();
+  const auto eye = cameraPosition();
+  const auto direction = -orbitFrame(viewOrbitAngles()).cameraOffsetDirection;
+  const double radius = std::max<double>(mScene->mSceneRadius *
+      model.mapVector(QVector3D(1, 0, 0)).length(), 1e-4);
+  const auto &poses = mScene->mCameraTrajectory.cameras();
+  double best = std::numeric_limits<double>::infinity();
+  qsizetype index = -1;
+  for (auto it = mCalibratedPhotos.cbegin(); it != mCalibratedPhotos.cend(); ++it) {
+    const auto candidate = it.key();
+    if (candidate < 0 || candidate >= poses.size()) continue;
+    if (!mCalibratedPhotoRequestedKey.isEmpty() && calibratedPhotoKey(candidate) != mCalibratedPhotoRequestedKey)
+      continue;
+    const auto &pose = poses[candidate];
+    const auto center = model.map(mScene->mSceneCoordinates.localFromGlobal(pose.globalPosition));
+    const auto forward = model.mapVector(pose.forward).normalized();
+    const double score = double((center - eye).lengthSquared()) / (radius * radius) +
+        2. * (1. - QVector3D::dotProduct(direction, forward));
+    if (std::isfinite(score) && (score < best || (score == best && candidate < index))) {
+      best = score;
+      index = candidate;
+    }
+  }
+  if (index < 0) {
+    mCalibratedPhotoKeyUnavailable = true;
+    update();
+    return;
+  }
+  if (!mCalibratedPhotoReturnView || mCalibratedPhotoViewScene.lock() != mScene) {
+    mCalibratedPhotoReturnView = PhotoOverlayReturnView{currentProcessingView(), mStoredCameraView,
+        mSourceCameraIntrinsics, mSourceCameraClipping, mCameraViewActive};
+    mCalibratedPhotoViewScene = mScene;
+  }
+  const QScopedValueRollback<bool> authorized(mReviewCameraAuthorized, mReconstructionReviewOnly);
+  if (!setSourceCameraView(index)) {
+    mCalibratedPhotoKeyUnavailable = true;
+    return;
+  }
+  if (mCalibratedPhotoIndex != index) {
+    invalidateCalibratedPhoto();
+    mCalibratedPhotoIndex = index;
+    mCalibratedPhotoReadRequired = true;
+  }
+  mSourceCameraIntrinsics = mCalibratedPhotos[index].intrinsics;
+  mCalibratedPhotoModel = modelMatrix();
+  mCalibratedPhotoView = viewMatrix();
+  if (mCalibratedPhotoLocked) mCalibratedPhotoRequestedKey = calibratedPhotoKey(index);
+  else mCalibratedPhotoRequestedKey.clear();
+  readCalibratedPhoto();
+  update();
+}
+
+void NativeViewport::readCalibratedPhoto() {
+  const auto selected = mCalibratedPhotos.constFind(mCalibratedPhotoIndex);
+  if (!mShowCalibratedPhoto || !cameraPhotoContextMatches() || mCalibratedPhotoReadBusy ||
+      !mCalibratedPhotoReadRequired || selected == mCalibratedPhotos.cend()) return;
+  const auto ref = selected->reference;
+  const auto k = selected->intrinsics;
+  const QSize raster{int(k[5]), int(k[6])};
+  const auto epoch = mCalibratedPhotoEpoch;
+  const auto generation = epoch->load();
+  mCalibratedPhotoReadBusy = true;
+  mCalibratedPhotoReadRequired = false;
+  auto *watcher = new QFutureWatcher<CameraPhotoRead>(this);
+  connect(watcher, &QFutureWatcher<CameraPhotoRead>::finished, this, [this,watcher,epoch,generation,ref] {
+    const auto result = watcher->result();
+    watcher->deleteLater();
+    mCalibratedPhotoReadBusy = false;
+    const auto selected = mCalibratedPhotos.constFind(mCalibratedPhotoIndex);
+    if (epoch->load() == generation && mShowCalibratedPhoto && cameraPhotoContextMatches() &&
+        selected != mCalibratedPhotos.cend() && selected->reference == ref) {
+      mCalibratedPhotoRead = result;
+      if (result.status == CameraPhotoStatus::Available) {
+        if (!mCalibratedPhotoFile) {
+          mCalibratedPhotoFile = new QFileSystemWatcher(this);
+          connect(mCalibratedPhotoFile, &QFileSystemWatcher::fileChanged, this, [this](const QString &path) {
+            const auto current = mCalibratedPhotos.constFind(mCalibratedPhotoIndex);
+            if (current != mCalibratedPhotos.cend() &&
+                QDir(current->reference.datasetRoot).filePath(current->reference.relativePath) == path) {
+              ++*mCalibratedPhotoEpoch;
+              mCalibratedPhotoRead = {{}, QFileInfo(path).isFile()
+                  ? CameraPhotoStatus::Changed : CameraPhotoStatus::Missing};
+              update();
+            }
+          });
+        }
+        mCalibratedPhotoFile->addPath(QDir(ref.datasetRoot).filePath(ref.relativePath));
+      }
+    }
+    readCalibratedPhoto();
+    update();
+  });
+  watcher->setFuture(QtConcurrent::run([ref, raster, epoch, generation] {
+    return readCameraPhoto(ref, QSize(2048, 2048),
+        [epoch,generation] { return epoch->load() != generation; }, raster);
+  }));
 }
 
 void NativeViewport::setCameraPhotoReview(const QJsonObject &report, const QString &taskCameraIdentity) {
   const auto fromReport = cameraPhotoReferences(report);
+  const auto overlayFromReport = cameraPhotoReferences(report, CameraPhotoRole::Calibrated);
   const auto reviewed = CameraTrajectory::fromReconstructionReview(report);
   QHash<qsizetype, CameraPhotoReference> references;
+  QHash<qsizetype, CalibratedPhoto> calibrated;
   const auto &cameras = mScene->mCameraTrajectory.cameras();
   if (!reviewed.metadataVerified() || reviewed.invalidCameraCount() != 0) return;
+  const auto addOverlay = [&](qsizetype index, const CameraPose &pose) {
+    const auto ref = overlayFromReport.constFind(pose.viewId);
+    if (ref != overlayFromReport.cend())
+      if (const auto photo = calibratedPhoto(pose, *ref)) calibrated.insert(index, *photo);
+  };
+  const auto samePose = [](const CameraPose &a, const CameraPose &b) {
+    const auto close = [](double lhs, double rhs) {
+      return std::isfinite(lhs) && std::isfinite(rhs) &&
+          std::abs(lhs - rhs) <= std::max(1e-6, std::abs(rhs) * 2e-7);
+    };
+    return close(a.globalPosition.x, b.globalPosition.x) &&
+        close(a.globalPosition.y, b.globalPosition.y) && close(a.globalPosition.z, b.globalPosition.z) &&
+        (a.right - b.right).lengthSquared() <= 1e-8F &&
+        (a.imageDown - b.imageDown).lengthSquared() <= 1e-8F &&
+        (a.forward - b.forward).lengthSquared() <= 1e-8F;
+  };
   if (mReconstructionReviewOnly &&
       reviewed.sourcePath() == mScene->mCameraTrajectory.sourcePath()) {
     for (qsizetype index = 0; index < cameras.size(); ++index) {
       const auto ref = fromReport.constFind(cameras[index].viewId);
       if (ref != fromReport.cend()) references.insert(index, *ref);
+      addOverlay(index, cameras[index]);
     }
   } else if (!mReconstructionReviewOnly && validCameraPhotoDigest(taskCameraIdentity) &&
              report.value(QStringLiteral("photoScope")) == QJsonValue(QStringLiteral("task_originals")) &&
@@ -2328,6 +2623,8 @@ void NativeViewport::setCameraPhotoReview(const QJsonObject &report, const QStri
     const auto inputIdentity = cameraInputDataIdentity();
     const bool legacy = inputIdentity.isEmpty();
     QHash<QString, qsizetype> uses;
+    QHash<QString, const CameraPose *> byId;
+    for (const auto &camera : reviewed.cameras()) byId.insert(camera.viewId, &camera);
     for (const auto &camera : cameras) ++uses[legacy ? camera.imageName : camera.viewId];
     for (qsizetype index = 0; index < cameras.size(); ++index) {
       const auto &camera = cameras[index];
@@ -2335,8 +2632,16 @@ void NativeViewport::setCameraPhotoReview(const QJsonObject &report, const QStri
       const auto ref = fromReport.constFind(id);
       if (ref == fromReport.cend() || uses.value(id) != 1) continue;
       if (legacy || (inputIdentity == taskCameraIdentity && camera.imageName == ref->relativePath &&
-                     camera.imageSha256 == ref->sha256))
+                     camera.imageSha256 == ref->sha256)) {
         references.insert(index, *ref);
+        if (const auto *pose = byId.value(id, nullptr)) {
+          if (legacy && samePose(camera, *pose)) addOverlay(index, *pose);
+          if (!legacy && mScene->mCameraTrajectory.metadataVerified() &&
+              camera.intrinsics == pose->intrinsics && camera.width == pose->width &&
+              camera.height == pose->height && camera.pixelCoordinates == pose->pixelCoordinates)
+            addOverlay(index, *pose);
+        }
+      }
     }
   } else if (!mReconstructionReviewOnly && cameraInputDataIdentity().isEmpty() &&
              report.value(QStringLiteral("sourceKind")) == QJsonValue(QStringLiteral("colmap")) &&
@@ -2346,29 +2651,27 @@ void NativeViewport::setCameraPhotoReview(const QJsonObject &report, const QStri
     // can join the verified report; IDs in legacy cameras.json are often row
     // numbers and must not be used to guess a photo.
     QHash<QString, const CameraPose *> byName;
+    QHash<QString, qsizetype> uses;
+    for (const auto &camera : cameras)
+      ++uses[camera.imageName.normalized(QString::NormalizationForm_C).toCaseFolded()];
     for (const auto &camera : reviewed.cameras()) {
       if (byName.contains(camera.imageName)) byName[camera.imageName] = nullptr;
       else byName.insert(camera.imageName, &camera);
     }
-    const auto close = [](double a, double b) {
-      return std::isfinite(a) && std::isfinite(b) &&
-          std::abs(a-b) <= std::max(1e-6, std::abs(b)*2e-7);
-    };
     for (qsizetype index = 0; index < cameras.size(); ++index) {
       const auto &camera = cameras[index];
       const auto *pose = byName.value(camera.imageName, nullptr);
       if (!pose || !validCameraPhotoRelativePath(camera.imageName)) continue;
-      const auto &a = camera.globalPosition;
-      const auto &b = pose->globalPosition;
-      if (!close(a.x,b.x) || !close(a.y,b.y) || !close(a.z,b.z) ||
-          (camera.right-pose->right).lengthSquared() > 1e-8F ||
-          (camera.imageDown-pose->imageDown).lengthSquared() > 1e-8F ||
-          (camera.forward-pose->forward).lengthSquared() > 1e-8F) continue;
+      if (!samePose(camera, *pose)) continue;
       const auto ref = fromReport.constFind(pose->viewId);
       if (ref != fromReport.cend()) references.insert(index, *ref);
+      if (uses.value(camera.imageName.normalized(QString::NormalizationForm_C).toCaseFolded()) == 1 &&
+          (camera.width <= 0 || camera.width == pose->width) &&
+          (camera.height <= 0 || camera.height == pose->height))
+        addOverlay(index, *pose);
     }
   }
-  replaceCameraPhotoReferences(std::move(references));
+  replaceCameraPhotoReferences(std::move(references), std::move(calibrated));
 }
 
 void NativeViewport::setEditToolsLocked(const bool locked) {
@@ -3941,6 +4244,7 @@ void NativeViewport::paintGL() {
   glClearColor(clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w());
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   if (diagnosticFrame) mRenderDiagnostics->stage(QStringLiteral("after-clear"));
+  if (!mCapturingProcessingReferenceImage) scheduleCalibratedPhoto();
   if (!mCapturingProcessingReferenceImage && mProcessingPreviewVisible &&
       mScene == mProcessingScene && !mProcessingPausedImage.isNull() &&
       (mProcessingPreviewPaused || mProcessingPreviewResumePending)) {
@@ -3976,6 +4280,21 @@ void NativeViewport::paintGL() {
   mCollectionProjection = projection;
   const QMatrix4x4 viewProjection = projection * view;
   const QMatrix4x4 modelViewProjection = viewProjection * modelMatrix();
+  if (!mCapturingProcessingReferenceImage && !mCalibratedPhotoInFront &&
+      !mCalibratedPhotoRead.pixels.isNull() && calibratedPhotoAligned()) {
+    QPainter backdrop(this);
+    drawCalibratedPhoto(backdrop);
+    backdrop.end();
+    // QPainter's GL engine may leave raster state different from the
+    // scene renderer. Re-establish the geometry pass inputs.
+    const auto dpr = devicePixelRatioF();
+    glViewport(0, 0, qRound(width() * dpr), qRound(height() * dpr));
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+  }
   drawInfiniteGrid(viewProjection);
   if (diagnosticFrame) mRenderDiagnostics->stage(QStringLiteral("after-grid"));
   const auto active = mScene;
@@ -4028,6 +4347,7 @@ void NativeViewport::paintGL() {
 
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
+  if (mCalibratedPhotoInFront) drawCalibratedPhoto(painter);
   drawCameraTrajectory(painter, modelViewProjection);
   drawSelectionGesture(painter);
   drawModelSelection(painter, modelViewProjection);
@@ -7439,6 +7759,10 @@ bool NativeViewport::setSourceCameraView(const qsizetype index) {
 }
 
 void NativeViewport::leaveCameraView() {
+  if (mShowCalibratedPhoto && !mCalibratedPhotoLocked) {
+    mCalibratedPhotoRequestedKey.clear();
+    mCalibratedPhotoKeyUnavailable = false;
+  }
   if (!mCameraViewActive) {
     return;
   }
@@ -7707,11 +8031,13 @@ QMatrix4x4 NativeViewport::projectionMatrix() const {
     projection(0, 0) *= mFocalAspectCorrection;
     if(mCameraViewActive && mSourceCameraIntrinsics) {
       const auto &k=*mSourceCameraIntrinsics;
-      projection(0,0)=static_cast<float>(2.*k[0]/(k[6]*aspect));
-      projection(0,1)=static_cast<float>(-2.*k[4]/(k[6]*aspect));
-      projection(0,2)=static_cast<float>((k[5]-2.*k[2])/(k[6]*aspect));
-      projection(1,1)=static_cast<float>(2.*k[1]/k[6]);
-      projection(1,2)=static_cast<float>(2.*k[3]/k[6]-1.);
+      const double fit = calibratedPhotoAligned() && height() > 0
+          ? calibratedPhotoRect(k).height() / height() : 1.;
+      projection(0,0)=static_cast<float>(fit*2.*k[0]/(k[6]*aspect));
+      projection(0,1)=static_cast<float>(fit*-2.*k[4]/(k[6]*aspect));
+      projection(0,2)=static_cast<float>(fit*(k[5]-2.*k[2])/(k[6]*aspect));
+      projection(1,1)=static_cast<float>(fit*2.*k[1]/k[6]);
+      projection(1,2)=static_cast<float>(fit*(2.*k[3]/k[6]-1.));
     }
   }
   return projection;
@@ -9078,11 +9404,76 @@ QList<NativeViewport::ProjectedCameraCard> NativeViewport::projectCameraCards(
 qsizetype NativeViewport::cameraCardAt(const QPointF &position) const {
   if (!mShowCameras || !mScene->visible || !camerasAvailable()) return -1;
   const auto cards = projectCameraCards(viewProjectionMatrix() * modelMatrix());
+  if (mShowCameraLabels) {
+    for (const auto &label : placeCameraLabels(cards))
+      if (label.box.contains(position)) return label.index;
+  }
   for (auto it = cards.crbegin(); it != cards.crend(); ++it) {
     if (it->plane.containsPoint(position, Qt::OddEvenFill) ||
         QLineF(position, it->center).length() <= 4.) return it->index;
   }
   return -1;
+}
+
+QList<NativeViewport::ProjectedCameraLabel> NativeViewport::placeCameraLabels(
+    const QList<ProjectedCameraCard> &cards) const {
+  constexpr int maximumLabels = 64;
+  const QRectF canvas = QRectF(rect()).adjusted(8, 8, -8, -30);
+  if (canvas.width() < 120 || canvas.height() < 64) return {};
+  const QFontMetricsF metrics(font());
+  const qreal labelHeight = std::ceil(metrics.height()) + 6;
+  const qreal maxText = std::min(qreal(244), canvas.width() * .38);
+  // The photo status shares the HUD's header/processing stack.
+  const qreal hudBottom = mShowCalibratedPhoto
+      ? qMax(70., (mProcessingStage.isEmpty() ? 3. : 5.) * metrics.height() + 36.)
+      : 70.;
+  // Cards are already back-to-front. Give the selected camera first refusal
+  // of scarce label space, then nearer cameras, without changing draw order.
+  QList<const ProjectedCameraCard *> order;
+  order.reserve(cards.size());
+  for (auto it = cards.crbegin(); it != cards.crend(); ++it) {
+    if (it->index == mHighlightedCameraPhoto) order.prepend(&*it);
+    else order.append(&*it);
+  }
+  QList<ProjectedCameraLabel> labels;
+  for (const auto *card : order) {
+    const auto photo = mCalibratedPhotos.constFind(card->index);
+    auto name = cameraPhotoContextMatches() && photo != mCalibratedPhotos.cend()
+        ? photo->imageName : cameraPhotoName(card->index);
+    if (name.isEmpty()) continue;
+    name = metrics.elidedText(name, Qt::ElideMiddle, maxText);
+    const qreal labelWidth = std::ceil(metrics.horizontalAdvance(name)) + 10;
+    const auto shape = card->plane.boundingRect();
+    constexpr qreal gap = 10;
+    const auto &p = card->center;
+    const std::array<QPointF, 8> candidates{
+        QPointF(shape.right() + gap, shape.top() - labelHeight - gap),
+        QPointF(shape.left() - labelWidth - gap, shape.top() - labelHeight - gap),
+        QPointF(shape.right() + gap, shape.bottom() + gap),
+        QPointF(shape.left() - labelWidth - gap, shape.bottom() + gap),
+        QPointF(shape.right() + gap, p.y() - labelHeight / 2),
+        QPointF(shape.left() - labelWidth - gap, p.y() - labelHeight / 2),
+        QPointF(p.x() - labelWidth / 2, shape.top() - labelHeight - gap),
+        QPointF(p.x() - labelWidth / 2, shape.bottom() + gap)};
+    for (const auto &position : candidates) {
+      const QRectF box(position, QSizeF(labelWidth, labelHeight));
+      if (!canvas.contains(box)) continue;
+      // Leave room for the persistent heading and navigation controls.
+      if (box.top() < hudBottom && (mShowCalibratedPhoto || box.left() < 270 || box.right() > width() - 90))
+        continue;
+      if (box.bottom() > height() - 210 && box.right() > width() - 68) continue;
+      const auto padded = box.adjusted(-4, -3, 4, 3);
+      if (std::any_of(labels.cbegin(), labels.cend(), [&](const auto &other) { return padded.intersects(other.box); }) ||
+          std::any_of(cards.cbegin(), cards.cend(), [&](const auto &other) { return padded.contains(other.center); }))
+        continue;
+      const QPointF contact(std::clamp(p.x(), box.left(), box.right()),
+                           std::clamp(p.y(), box.top(), box.bottom()));
+      labels.append({card->index, box, QLineF(p, contact), name});
+      break;
+    }
+    if (labels.size() >= maximumLabels) break;
+  }
+  return labels;
 }
 
 void NativeViewport::queueCameraThumbnails(const QList<ProjectedCameraCard> &cards) {
@@ -9204,6 +9595,13 @@ void NativeViewport::drawCameraTrajectory(QPainter &painter,
   }
   const auto cards = projectCameraCards(viewProjection);
   queueCameraThumbnails(cards);
+  const auto labels = mShowCameraLabels ? placeCameraLabels(cards) : QList<ProjectedCameraLabel>{};
+  const auto labelAccent = themeInk(QColor(255,203,119), QColor(171,97,10));
+  for (const auto &label : labels) {
+    painter.setPen(QPen(label.index == mHighlightedCameraPhoto ? labelAccent :
+        themeInk(QColor(189,208,231,190), QColor(55,77,100,196)), 1.0));
+    painter.drawLine(label.leader);
+  }
   const auto edge = themeInk(QColor(129, 191, 255, 242), QColor(29, 102, 191, 230));
   const auto fill = themeInk(QColor(75, 147, 247, 123), QColor(54, 136, 236, 110));
   const bool usePhotos = mShowCameraPhotos && cameraPhotoContextMatches();
@@ -9236,7 +9634,44 @@ void NativeViewport::drawCameraTrajectory(QPainter &painter,
       painter.drawPolygon(card.plane);
     }
   }
+  painter.setFont(font());
+  for (const auto &label : labels) {
+    const bool selected = label.index == mHighlightedCameraPhoto;
+    painter.setPen(QPen(selected ? labelAccent : themeInk(QColor(128,153,178,122), QColor(92,123,157,113)), 1));
+    painter.setBrush(themeInk(QColor(29,39,52,236), QColor(251,253,255,242)));
+    painter.drawRoundedRect(label.box, 3, 3);
+    painter.setPen(selected ? labelAccent : themeInk(QColor(231,241,253), QColor(29,48,69)));
+    painter.drawText(label.box.adjusted(5,0,-5,0), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, label.text);
+  }
   painter.restore();
+}
+
+void NativeViewport::drawCalibratedPhoto(QPainter &painter) {
+  if (mCapturingProcessingReferenceImage || mCalibratedPhotoRead.pixels.isNull() ||
+      !calibratedPhotoAligned()) return;
+  painter.save();
+  painter.setOpacity(mCalibratedPhotoOpacity / 100.);
+  painter.setRenderHint(QPainter::SmoothPixmapTransform);
+  painter.drawImage(calibratedPhotoRect(*mSourceCameraIntrinsics), mCalibratedPhotoRead.pixels);
+  painter.restore();
+}
+
+QString NativeViewport::calibratedPhotoStatusText() const {
+  if (!mShowCalibratedPhoto || !mScene->visible) return {};
+  if (displayingProcessingPreview() && (mProcessingPreviewPaused || mProcessingPreviewResumePending))
+    return QCoreApplication::translate("Workbench", "画面已冻结，恢复预览后可叠加照片。");
+  if (!calibratedPhotoTransformSupported())
+    return QCoreApplication::translate("Workbench", "模型使用非等比或镜像变换，无法对齐照片。");
+  if (!cameraPhotoContextMatches() || mCalibratedPhotos.isEmpty() || mCalibratedPhotoKeyUnavailable)
+    return QCoreApplication::translate("Workbench", "没有可核实的标定照片，未使用原图替代。");
+  if (!calibratedPhotoAligned() || mCalibratedPhotoReadBusy || mCalibratedPhotoReadRequired)
+    return QCoreApplication::translate("Workbench", "正在对齐标定照片…");
+  if (mCalibratedPhotoRead.status == CameraPhotoStatus::InvalidCalibration)
+    return cameraPhotoStatusText(CameraPhotoStatus::InvalidCalibration);
+  if (mCalibratedPhotoRead.pixels.isNull())
+    return QCoreApplication::translate("Workbench", "标定照片缺失、已变化或不可读取。");
+  return QCoreApplication::translate("Workbench", "标定照片 · %1").arg(
+      mCalibratedPhotos.value(mCalibratedPhotoIndex).imageName);
 }
 
 QString NativeViewport::selectionHintText() const {
@@ -9649,12 +10084,15 @@ void NativeViewport::drawOverlay(QPainter &painter) {
   drawViewportCaption(painter, lineRect, Qt::AlignLeft | Qt::AlignVCenter,
                    metrics.elidedText(compactCount, Qt::ElideRight, lineRect.width()), colors.muted);
 
+  const QString photoStatus = calibratedPhotoStatusText();
   if (!mProcessingStage.isEmpty()) {
     const QString phase = processingPreviewLabel();
     const QString detail = processingPreviewDetail();
     const int panelWidth = std::min(width() - viewportMargin * 2,
-        std::max(metrics.horizontalAdvance(phase), metrics.horizontalAdvance(detail)) + headerPaddingX * 2);
-    const QRect panel(viewportMargin, headerRect.bottom() + 6, panelWidth, headerHeight + 3);
+        std::max({metrics.horizontalAdvance(phase), metrics.horizontalAdvance(detail),
+                  metrics.horizontalAdvance(photoStatus)}) + headerPaddingX * 2);
+    const int photoRowHeight = photoStatus.isEmpty() ? 0 : lineHeight + lineGap;
+    const QRect panel(viewportMargin, headerRect.bottom() + 6, panelWidth, headerHeight + 3 + photoRowHeight);
     painter.setPen(overlayBorder());
     painter.setBrush(overlaySurface(colors.processCard, 225));
     painter.drawRoundedRect(panel, 5, 5);
@@ -9665,11 +10103,32 @@ void NativeViewport::drawOverlay(QPainter &painter) {
     row.translate(0, lineHeight + lineGap);
     painter.setPen(colors.processDetail);
     painter.drawText(row, Qt::AlignVCenter, metrics.elidedText(detail, Qt::ElideRight, row.width()));
+    if (!photoStatus.isEmpty()) {
+      row.translate(0, lineHeight + lineGap);
+      painter.setPen(colors.processText);
+      painter.drawText(row, Qt::AlignVCenter, metrics.elidedText(photoStatus, Qt::ElideMiddle, row.width()));
+    }
     if (mProcessingActive && mProcessingProgress >= 0) {
       painter.setPen(Qt::NoPen);
       painter.setBrush(colors.progress);
       painter.drawRect(QRect(panel.left(), panel.bottom() - 2,
           panel.width() * std::clamp(mProcessingProgress, 0, 100) / 100, 2));
+    }
+  } else if (!photoStatus.isEmpty()) {
+    const int left = !mEditToolsLocked && selectableModelAvailable()
+        ? qMax(viewportMargin, int(std::ceil(transformToolStrip().background.right())) + viewportMargin)
+        : viewportMargin;
+    const int available = width() - left - modeWidth - viewportMargin * 2;
+    if (available > headerPaddingX * 2) {
+      const QString caption = metrics.elidedText(photoStatus, Qt::ElideMiddle, available - headerPaddingX * 2);
+      const int badgeWidth = metrics.horizontalAdvance(caption) + headerPaddingX * 2;
+      const QRect badge(left + (available - badgeWidth) / 2, headerRect.bottom() + 8,
+          badgeWidth, lineHeight + headerPaddingY * 2);
+      painter.setPen(overlayBorder());
+      painter.setBrush(overlaySurface(colors.card, 240));
+      painter.drawRoundedRect(badge, 4, 4);
+      painter.setPen(colors.text);
+      painter.drawText(badge, Qt::AlignCenter | Qt::TextSingleLine, caption);
     }
   }
 
