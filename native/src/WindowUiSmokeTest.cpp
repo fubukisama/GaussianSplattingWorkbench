@@ -22,6 +22,7 @@
 #include <QLabel>
 #include <QListView>
 #include <QMainWindow>
+#include <QMenu>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QProgressDialog>
@@ -728,12 +729,25 @@ bool runWindowUiAppearanceSmokeTest(QMainWindow &workbench) {
   };
   auto *light = workbench.findChild<QAction *>(QStringLiteral("lightThemeAction"));
   auto *dark = workbench.findChild<QAction *>(QStringLiteral("darkThemeAction"));
+  QMenu *scaleMenu = nullptr;
+  if (auto *settings = workbench.findChild<QMenu *>(QStringLiteral("displaySettingsMenu"))) {
+    const auto title = QCoreApplication::translate("Workbench", "手动界面比例");
+    for (auto *item : settings->actions()) {
+      auto *menu = item->menu();
+      if (!menu || menu->title() != title) continue;
+      check(!scaleMenu, "display settings contain only one manual UI-scale menu");
+      scaleMenu = menu;
+    }
+  }
   check(light && dark, "actual light and dark appearance menu actions are available");
-  if (light && dark) for (auto *theme : {light, dark, light}) {
+  check(scaleMenu, "display settings contain a real manual UI-scale menu");
+  if (light && dark && scaleMenu) for (auto *theme : {light, dark, light}) {
     theme->trigger();
     for (const int scale : {90, 100, 150}) {
       QAction *scaleAction = nullptr;
-      for (auto *action : workbench.findChildren<QAction *>())
+      // The photo-overlay opacity menu can also contain a checkable 100%.
+      // Use the actual visual boundary that owns the manual scale commands.
+      for (auto *action : scaleMenu->actions())
         if (action->isCheckable() && action->data().toInt() == scale) { scaleAction = action; break; }
       check(scaleAction != nullptr, "real manual UI-scale command is available");
       if (!scaleAction) continue;
