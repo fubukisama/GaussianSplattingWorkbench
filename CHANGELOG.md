@@ -27,7 +27,7 @@ separate claims.
   priority. Independently show a verified registered image from its calibrated
   pose in front of or behind the model, adjust opacity or lock the photo. Turn
   the overlay off to return to the previous view. These are display-only
-  features shared by 3DGS and 2DGS, including owned training previews.
+  features shared by 3DGS and 2DGS, including owned training previews. [Source](https://github.com/fubukisama/GaussianSplattingWorkbench/commit/fc8074a8d0909daecb27ba4c9e5db310ab06fd42)
 - **Photo compatibility:** comparison uses a raster verified against its
   pinhole calibration. The registered/undistorted image is distinct from
   **View Original**; mismatched or unverifiable images are not substituted.
