@@ -9,7 +9,7 @@ on:
         description: Exact camera cards, training originals, or calibrated camera overlay gate
         type: choice
         default: camera-cards
-        options: [camera-cards, task-preview-red, task-preview-green, labels-overlay-red, labels-overlay-green]
+        options: [camera-cards, task-preview-red, task-preview-green, labels-overlay-red, labels-overlay-green, completed-checkpoint]
       candidate:
         description: Unreferenced product commit directly extending the dispatch source
         type: string
@@ -74,10 +74,13 @@ jobs:
           }
           $taskPreview = $env:SUITE -cin @('task-preview-red', 'task-preview-green')
           $calibrated = $env:SUITE -cin @('labels-overlay-red', 'labels-overlay-green')
+          $checkpoint = $env:SUITE -ceq 'completed-checkpoint'
           $allowed = if ($taskPreview) { @('native/src/ProcessingCompletionSmokeTest.cpp') }
                      else { @('native/src/ReconstructionReviewSmokeTest.cpp') }
           $allowed = @($allowed)
-          if ($calibrated -and $env:CASE -ceq 'candidate') {
+          if ($checkpoint -and $env:CASE -ceq 'candidate') {
+            $allowed += @('native/src/MainWindow.cpp','CHANGELOG.md','CHANGELOG.zh-CN.md','CHANGELOG.ja.md')
+          } elseif ($calibrated -and $env:CASE -ceq 'candidate') {
             $allowed += @(
               'CHANGELOG.md', 'CHANGELOG.zh-CN.md', 'CHANGELOG.ja.md',
               'native/i18n/catalog.json', 'native/backend/reconstruction_review.py',
@@ -202,7 +205,7 @@ jobs:
           $targets = @('GaussianSceneWorkbench')
           if ($env:SUITE -cin @('task-preview-red', 'task-preview-green', 'labels-overlay-green')) {
             $targets += 'gsw_process_output_fixture'
-          } elseif ($env:CASE -ceq 'candidate') {
+          } elseif ($env:CASE -ceq 'candidate' -and $env:SUITE -cne 'completed-checkpoint') {
             $targets += @('gsw_camera_trajectory_tests','gsw_native_viewport_locale_tests')
           }
           cmake --build "$build" --config Release --parallel --target @targets 2>&1 |
@@ -226,7 +229,9 @@ jobs:
           $evidence = $env:GSW_CAMERA_EVIDENCE
           $taskPreview = $env:SUITE -cin @('task-preview-red', 'task-preview-green')
           $names = @('native_reconstruction_review')
-          if ($env:SUITE -ceq 'labels-overlay-green') {
+          if ($env:SUITE -ceq 'completed-checkpoint') {
+            if ($env:CASE -ceq 'candidate') { $names += 'native_reconstruction_review_contracts' }
+          } elseif ($env:SUITE -ceq 'labels-overlay-green') {
             $names += @('native_processing_completion', 'native_reconstruction_review_contracts')
           } elseif ($taskPreview) {
             $names = @('native_processing_completion')
@@ -249,7 +254,16 @@ jobs:
             throw 'Missing or unexpected camera test cases'
           }
           $log = Get-Content -Raw -LiteralPath "$evidence/ctest.log"
-          if ($env:SUITE -ceq 'labels-overlay-red') {
+          if ($env:SUITE -ceq 'completed-checkpoint' -and $env:CASE -ceq 'witness') {
+            if ($exit -eq 0 -or $null -eq $cases[0].SelectSingleNode('failure') -or
+                !$log.Contains('Reconstruction review PASS: reopened protected completion displays its owned camera poses') -or
+                !$log.Contains('Reconstruction review FAIL: completed checkpoint opens its verified archived original') -or
+                $log -cmatch 'Reconstruction review FAIL: (?!completed checkpoint opens its verified archived original)') {
+              throw 'The completed checkpoint photo loss was not isolated on the baseline'
+            }
+            'REPRODUCED_RED (completed protected checkpoint lacks its owned original)' |
+              Set-Content -LiteralPath "$evidence/outcome.txt" -Encoding utf8
+          } elseif ($env:SUITE -ceq 'labels-overlay-red') {
             if ($exit -eq 0 -or $null -eq $cases[0].SelectSingleNode('failure') -or
                 !$log.Contains('Reconstruction review PASS: main dock displays the verified second original and not the same-name neighbor') -or
                 !$log.Contains('Reconstruction review FAIL: camera name leaders have an independent viewport control') -or
@@ -278,6 +292,16 @@ jobs:
           } else {
             if ($exit -ne 0 -or $report.SelectNodes('//testcase/failure | //testcase/skipped').Count -ne 0) {
               throw 'Camera/viewport candidate failed or skipped an expected case'
+            }
+            if ($env:SUITE -ceq 'completed-checkpoint') {
+              foreach ($backend in @('3dgs','2dgs')) {
+                if (!$log.Contains("Reconstruction review PASS: completed protected $backend original and registered pixels after reopen")) {
+                  throw "Missing completed protected checkpoint UI result: $backend"
+                }
+              }
+              if (!$log.Contains('Reconstruction review PASS: competing protected completion leaves photos unlinked')) {
+                throw 'Missing ambiguity guard at the real photo and overlay controls'
+              }
             }
             if ($env:SUITE -ceq 'task-preview-green') {
               foreach ($backend in @('3dgs', '2dgs')) {
