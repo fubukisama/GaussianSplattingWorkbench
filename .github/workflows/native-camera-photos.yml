@@ -6,10 +6,10 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: Exact camera cards gate, or the running/retained training preview photo gate
+        description: Exact camera cards, training originals, or calibrated camera overlay gate
         type: choice
         default: camera-cards
-        options: [camera-cards, task-preview-red, task-preview-green]
+        options: [camera-cards, task-preview-red, task-preview-green, labels-overlay-red, labels-overlay-green]
       candidate:
         description: Unreferenced product commit directly extending the dispatch source
         type: string
@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kind: ${{ fromJSON(inputs.suite == 'task-preview-red' && '["witness"]' || inputs.suite == 'task-preview-green' && '["candidate"]' || '["witness","candidate"]') }}
+        kind: ${{ fromJSON((inputs.suite == 'task-preview-red' || inputs.suite == 'labels-overlay-red') && '["witness"]' || (inputs.suite == 'task-preview-green' || inputs.suite == 'labels-overlay-green') && '["candidate"]' || '["witness","candidate"]') }}
     runs-on: windows-2022
     timeout-minutes: 45
     env:
@@ -73,10 +73,20 @@ jobs:
             throw 'Unexpected candidate compare history'
           }
           $taskPreview = $env:SUITE -cin @('task-preview-red', 'task-preview-green')
+          $calibrated = $env:SUITE -cin @('labels-overlay-red', 'labels-overlay-green')
           $allowed = if ($taskPreview) { @('native/src/ProcessingCompletionSmokeTest.cpp') }
                      else { @('native/src/ReconstructionReviewSmokeTest.cpp') }
           $allowed = @($allowed)
-          if ($taskPreview -and $env:CASE -ceq 'candidate') {
+          if ($calibrated -and $env:CASE -ceq 'candidate') {
+            $allowed += @(
+              'CHANGELOG.md', 'CHANGELOG.zh-CN.md', 'CHANGELOG.ja.md',
+              'native/i18n/catalog.json', 'native/backend/reconstruction_review.py',
+              'native/worker/test_reconstruction_review.py', 'native/src/CameraPhotoIO.cpp',
+              'native/src/CameraPhotoIO.h', 'native/src/MainWindow.cpp', 'native/src/MainWindow.h',
+              'native/src/MainWindowCameraPhotos.cpp', 'native/src/NativeViewport.cpp',
+              'native/src/NativeViewport.h', 'native/src/ProcessingCompletionSmokeTest.cpp'
+            )
+          } elseif ($taskPreview -and $env:CASE -ceq 'candidate') {
             $allowed += @(
               'CHANGELOG.md', 'CHANGELOG.zh-CN.md', 'CHANGELOG.ja.md',
               'native/README.md', 'native/i18n/catalog.json',
@@ -189,7 +199,7 @@ jobs:
             "-DVCPKG_INSTALLED_DIR=$env:GSW_CAMERA_QA/deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { throw 'Camera configuration failed' }
           $targets = @('GaussianSceneWorkbench')
-          if ($env:SUITE -cin @('task-preview-red', 'task-preview-green')) {
+          if ($env:SUITE -cin @('task-preview-red', 'task-preview-green', 'labels-overlay-green')) {
             $targets += 'gsw_process_output_fixture'
           } elseif ($env:CASE -ceq 'candidate') {
             $targets += @('gsw_camera_trajectory_tests','gsw_native_viewport_locale_tests')
@@ -215,7 +225,9 @@ jobs:
           $evidence = $env:GSW_CAMERA_EVIDENCE
           $taskPreview = $env:SUITE -cin @('task-preview-red', 'task-preview-green')
           $names = @('native_reconstruction_review')
-          if ($taskPreview) {
+          if ($env:SUITE -ceq 'labels-overlay-green') {
+            $names += @('native_processing_completion', 'native_reconstruction_review_contracts')
+          } elseif ($taskPreview) {
             $names = @('native_processing_completion')
             if ($env:CASE -ceq 'candidate') {
               $names += @('native_reconstruction_review', 'native_reconstruction_review_contracts')
@@ -236,7 +248,16 @@ jobs:
             throw 'Missing or unexpected camera test cases'
           }
           $log = Get-Content -Raw -LiteralPath "$evidence/ctest.log"
-          if ($env:SUITE -ceq 'task-preview-red') {
+          if ($env:SUITE -ceq 'labels-overlay-red') {
+            if ($exit -eq 0 -or $null -eq $cases[0].SelectSingleNode('failure') -or
+                !$log.Contains('Reconstruction review PASS: main dock displays the verified second original and not the same-name neighbor') -or
+                !$log.Contains('Reconstruction review FAIL: camera name leaders have an independent viewport control') -or
+                $log -cmatch 'Reconstruction review FAIL: (?!camera name leaders have an independent viewport control)') {
+              throw 'The expected missing label control was not isolated at the real window'
+            }
+            'REPRODUCED_RED (baseline camera photos have no label control)' |
+              Set-Content -LiteralPath "$evidence/outcome.txt" -Encoding utf8
+          } elseif ($env:SUITE -ceq 'task-preview-red') {
             if ($exit -eq 0 -or $null -eq $cases[0].SelectSingleNode('failure') -or
                 $log -cnotmatch 'Processing completion FAIL: live preview opens its verified task original before optimizer completion' -or
                 $log -cmatch 'Processing completion FAIL: (?!live preview opens its verified task original before optimizer completion)') {
